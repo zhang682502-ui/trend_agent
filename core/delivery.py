@@ -8,7 +8,7 @@ import ssl
 import urllib.error
 import urllib.request
 from email.message import EmailMessage
-from secrets_loader import load_secrets
+from config.secrets_loader import load_secrets
 
 
 BASE_DIR = Path(__file__).resolve().parent

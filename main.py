@@ -18,10 +18,10 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from logging.handlers import RotatingFileHandler
 import feedparser
-from config_loader import ConfigError, load_config
-from delivery import deliver_to_all
-from secrets_loader import SecretConfigError, load_secrets
-from telegram_poll import start_telegram_polling
+from config.config_loader import ConfigError, load_config
+from config.secrets_loader import SecretConfigError, load_secrets
+from core.delivery import deliver_to_all
+from core.telegram_poll import start_telegram_polling
 from memory.identity import canonicalize_url, make_item_id
 from memory.ops_store import load_ops_memory, save_ops_memory_atomic, update_ops_after_run
 from memory.prefs import load_prefs
@@ -172,7 +172,9 @@ def _load_runtime_secrets() -> dict | None:
     try:
         return load_secrets()
     except SecretConfigError as exc:
-        message = f"Secret config error
+        message = f"Secret config error: {exc}"
+        logger.error(message)
+        print(message, file=sys.stderr)
         return None
 
 
