@@ -1,8 +1,10 @@
+# secrets
 password.txt
 secret.json
-*.log
-logs/
+config/secret.json
+
 # runtime / generated
+*.log
 logs/
 report/
 report_html/
@@ -15,5 +17,11 @@ Json/feed_failover_state.json
 memory/ops/*.json
 memory/recall/*.sqlite
 
+# Python / tooling noise
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
