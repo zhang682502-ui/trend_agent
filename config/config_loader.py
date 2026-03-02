@@ -2,8 +2,8 @@ from pathlib import Path
 import json
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_PATH = BASE_DIR / "Json" / "config.json"
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULT_CONFIG = {
     "telegram_stay_alive": True,
     "open_browser": True,

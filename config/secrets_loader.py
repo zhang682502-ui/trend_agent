@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent
 SECRET_PATH = BASE_DIR / "secret.json"
 REQUIRED_SECRET_KEYS = (
     "telegram_bot_token",
@@ -21,7 +21,7 @@ def load_secrets(required_keys: tuple[str, ...] = REQUIRED_SECRET_KEYS) -> dict:
     if _SECRETS_CACHE is None:
         if not SECRET_PATH.exists():
             raise SecretConfigError(
-                f"Missing secret file: {SECRET_PATH}. Copy secret.example.json to secret.json and fill in the required values."
+                f"Missing secret file: {SECRET_PATH}. Copy config/secret.example.json to config/secret.json and fill in the required values."
             )
         try:
             data = json.loads(SECRET_PATH.read_text(encoding="utf-8-sig"))
@@ -39,5 +39,5 @@ def load_secrets(required_keys: tuple[str, ...] = REQUIRED_SECRET_KEYS) -> dict:
         if value is None or not str(value).strip():
             missing.append(key)
     if missing:
-        raise SecretConfigError(f"secret.json missing required keys: {', '.join(missing)}")
+        raise SecretConfigError(f"config/secret.json missing required keys: {', '.join(missing)}")
     return _SECRETS_CACHE

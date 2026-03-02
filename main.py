@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import argparse
 import os
 import sys
@@ -71,7 +71,7 @@ LOG_DIR.mkdir(exist_ok=True)
 REPORT_DIR.mkdir(exist_ok=True)
 HTML_REPORT_DIR.mkdir(exist_ok=True)
 
-CONFIG_PATH = JSON_DIR / "config.json"
+CONFIG_PATH = BASE_DIR / "config" / "config.json"
 FEED_TITLE_OVERRIDES: dict[str, str] = {}
 HISTORY_DEDUPE_LOOKBACK_DAYS = 7
 DEFAULT_DISPLAY_COUNT = 3
@@ -415,14 +415,14 @@ def handle_telegram_message(chat_id: int, text: str) -> str:
         logger.info("TG cmd=%s chat_id=%s", cmd, chat_id)
 
     if cmd == "ping":
-        return "pong ✅"
+        return "pong ?"
 
     if cmd == "status":
-        return "TrendAgent alive ✅"
+        return "TrendAgent alive ?"
 
     if cmd == "report":
         if RUN_TRIGGER_LOCK.locked():
-            return "Report already running ⏳"
+            return "Report already running ?"
 
         def run_report() -> None:
             exit_code = -1
@@ -435,7 +435,7 @@ def handle_telegram_message(chat_id: int, text: str) -> str:
                 logger.info("TG trigger report finished (exit_code=%s) chat_id=%s", exit_code, chat_id)
 
         threading.Thread(target=run_report, daemon=True).start()
-        return "Report triggered ✅"
+        return "Report triggered ?"
 
     if cmd == "help":
         return "Commands: ping, status, report/run, hl/highlights (alias: summary), last, help, stats, errors"
@@ -2135,7 +2135,7 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
         "lookback_days": HISTORY_DEDUPE_LOOKBACK_DAYS,
         "categories": {},
     },
-    "events": []   # ä½ ä»¥åŽå¯ä»¥æŠŠå…³é”®æ­¥éª¤å†™è¿›è¿™é‡Œï¼ˆå¯é€‰ï¼‰
+    "events": []   # 你以后可以把关键步骤写进这里（可选）
     }
 
     write_status(status)
@@ -2752,3 +2752,4 @@ if __name__ == "__main__":
     if args.once:
         raise SystemExit(main(start_telegram=False))
     raise SystemExit(main(start_telegram=False))
+
