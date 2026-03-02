@@ -1,0 +1,13 @@
+{
+    "editor.minimap.enabled": true,
+    "files.exclude": {
+        "**/.venv": true,
+        "**/venv": true,
+        "**/__pycache__": true
+    },
+    "search.exclude": {
+        "**/.venv": true,
+        "**/venv": true,
+        "**/__pycache__": true
+    }
+}

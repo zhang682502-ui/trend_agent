@@ -1,0 +1,284 @@
+{
+  "rss_sources": {
+    "technology": [
+      "https://openai.com/blog/rss.xml",
+      "https://blog.google/technology/ai/rss/"
+    ],
+    "politics": {
+      "primary_sources": [
+        {
+          "name": "White House",
+          "id": "white_house",
+          "urls": [
+            "https://www.whitehouse.gov/sitemap.xml",
+            "https://www.whitehouse.gov/sitemap_index.xml",
+            "https://www.whitehouse.gov/post-sitemap2.xml"
+          ]
+        },
+        {
+          "name": "UK Gov",
+          "id": "gov_uk",
+          "urls": [
+            "https://www.gov.uk/search/news-and-communications.atom",
+            "https://www.gov.uk/search/all.atom?content_purpose_supergroup%5B%5D=news_and_communications"
+          ]
+        },
+        {
+          "name": "China Gov (Mainland)",
+          "id": "china_gov_mainland",
+          "urls": [
+            "https://www.gov.cn/yaowen/liebiao/YAOWENLIEBIAO.json",
+            "https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json"
+          ]
+        },
+        {
+          "name": "United Nations",
+          "id": "un_news",
+          "urls": [
+            "https://www.un.org/press/en/rss.xml",
+            "https://news.un.org/feed/subscribe/en/news/all/rss.xml"
+          ]
+        },
+        {
+          "name": "US GovInfo",
+          "id": "us_presidential_documents",
+          "urls": [
+            "https://www.govinfo.gov/rss/dcpd.xml"
+          ]
+        },
+        {
+          "name": "US State Department",
+          "id": "us_state_press_releases",
+          "urls": [
+            "https://www.state.gov/rss-feed/press-releases/feed/",
+            "https://www.state.gov/rss-feed/department-press-briefings/feed/"
+          ]
+        },
+        {
+          "name": "European Union",
+          "id": "eu_commission_presscorner",
+          "urls": [
+            "https://ec.europa.eu/commission/presscorner/api/rss"
+          ]
+        }
+      ],
+      "media_reporting": [
+        {
+          "name": "Reuters",
+          "id": "reuters",
+          "urls": [
+            "https://www.reuters.com/arc/outboundfeeds/news-sitemap/?outputType=xml",
+            "https://www.reuters.com/arc/outboundfeeds/sitemap/?outputType=xml"
+          ]
+        },
+        {
+          "name": "Politico",
+          "id": "politico",
+          "urls": [
+            "https://rss.politico.com/politics-news.xml",
+            "https://rss.politico.com/whitehouse.xml"
+          ]
+        },
+        {
+          "name": "BBC",
+          "id": "bbc_politics",
+          "urls": [
+            "https://feeds.bbci.co.uk/news/politics/rss.xml"
+          ]
+        },
+        {
+          "name": "The Guardian",
+          "id": "guardian_politics",
+          "urls": [
+            "https://www.theguardian.com/politics/rss"
+          ]
+        }
+      ]
+    },
+    "finance": [
+      "https://www.federalreserve.gov/feeds/press_all.xml",
+      "https://www.ecb.europa.eu/rss/press.html"
+    ],
+    "economic": {
+      "global_central_banks": [
+        {
+          "name": "US Federal Reserve",
+          "id": "econ_us_fed",
+          "urls": [
+            "https://www.federalreserve.gov/feeds/press_all.xml"
+          ]
+        },
+        {
+          "name": "United Nations",
+          "id": "econ_un",
+          "urls": [
+            "https://www.un.org/press/en/rss.xml",
+            "https://news.un.org/feed/subscribe/en/news/all/rss.xml"
+          ]
+        },
+        {
+          "name": "China State Council (Latest Policies)",
+          "id": "econ_china_state_council",
+          "urls": [
+            "https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json",
+            "https://www.gov.cn/yaowen/liebiao/YAOWENLIEBIAO.json"
+          ]
+        },
+        {
+          "name": "European Central Bank",
+          "id": "econ_ecb",
+          "urls": [
+            "https://www.ecb.europa.eu/rss/press.html"
+          ]
+        },
+        {
+          "name": "Eurostat",
+          "id": "econ_eurostat",
+          "urls": [
+            "https://ec.europa.eu/eurostat/api/dissemination/catalogue/rss/en/statistics-update.rss"
+          ]
+        }
+      ],
+      "official_statistics": [
+        {
+          "name": "US BLS Employment Situation",
+          "id": "econ_bls_empsit",
+          "urls": [
+            "https://www.bls.gov/feed/empsit.rss"
+          ]
+        },
+        {
+          "name": "US BLS Consumer Price Index",
+          "id": "econ_bls_cpi",
+          "urls": [
+            "https://www.bls.gov/feed/cpi.rss"
+          ]
+        },
+        {
+          "name": "Hong Kong Census and Statistics Department",
+          "id": "econ_hk_censtatd",
+          "urls": [
+            "https://www.censtatd.gov.hk/data/en/press_release/rss.xml"
+          ]
+        }
+      ]
+    },
+    "science": [
+      "https://www.nature.com/nature.rss",
+      "https://www.sciencedaily.com/rss/top.xml"
+    ],
+    "culture": [
+      "https://aeon.co/feed.rss",
+      {
+        "name": "Nautilus",
+        "id": "nautilus",
+        "urls": [
+          "https://nautil.us/feed/",
+          "https://nautil.us/feed"
+        ]
+      }
+    ],
+    "aviation": [
+      "https://www.nasa.gov/rss/dyn/breaking_news.rss",
+      {
+        "name": "Boeing",
+        "id": "boeing",
+        "urls": [
+          "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss",
+          "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss&l=50"
+        ]
+      }
+    ]
+  },
+  "feed_title_overrides": {
+    "https://blog.google/technology/ai/rss/": "Google AI"
+  },
+  "telegram_stay_alive": true,
+  "open_browser": true,
+  "max_per_feed": 3,
+  "max_active_feeds_per_subgroup": 3,
+  "agent_memory_path": "memory/run/agent_memory.json",
+  "max_active_feeds_per_subgroup_overrides": {
+    "politics.primary_sources": 4,
+    "economic.global_central_banks": 5
+  },
+  "feed_failover_switch_after_failures": 2,
+  "deprecated_feeds": [
+    {
+      "original_url": "https://www.whitehouse.gov/briefing-room/feed/",
+      "replacement": "https://www.whitehouse.gov/sitemap.xml",
+      "reason": "HTTP 404",
+      "deprecated_at": "2026-02-26T18:35:00"
+    },
+    {
+      "original_url": "https://www.gov.uk/government/announcements.atom",
+      "replacement": "https://www.gov.uk/search/news-and-communications.atom",
+      "reason": "HTTP 404",
+      "deprecated_at": "2026-02-26T18:35:00"
+    },
+    {
+      "original_url": "https://www.govinfo.gov/rss/fr.xml",
+      "replacement": "https://www.gov.cn/yaowen/index.htm",
+      "reason": "Replaced per user request with China government source",
+      "deprecated_at": "2026-02-27T09:05:00"
+    },
+    {
+      "original_url": "https://www.info.gov.hk/gia/rss/general_en.xml",
+      "replacement": "https://www.gov.cn/yaowen/liebiao/YAOWENLIEBIAO.json",
+      "reason": "Switched from HKSAR to mainland central-government source",
+      "deprecated_at": "2026-02-27T09:12:00"
+    },
+    {
+      "original_url": "https://www.gov.cn/yaowen/index.htm",
+      "replacement": "https://www.gov.cn/yaowen/liebiao/YAOWENLIEBIAO.json",
+      "reason": "Replaced HTML list page with official gov.cn machine-readable JSON endpoint",
+      "deprecated_at": "2026-02-27T09:20:00"
+    },
+    {
+      "original_url": "https://www.reutersagency.com/feed/?best-topics=politics",
+      "replacement": "https://www.reuters.com/arc/outboundfeeds/news-sitemap/?outputType=xml",
+      "reason": "HTTP 404 / retired Reuters Agency feed endpoint",
+      "deprecated_at": "2026-02-26T18:35:00"
+    },
+    {
+      "original_url": "https://www.politico.com/rss/politics08.xml",
+      "replacement": "https://rss.politico.com/politics-news.xml",
+      "reason": "HTTP 403/404 on legacy endpoint",
+      "deprecated_at": "2026-02-26T18:35:00"
+    },
+    {
+      "original_url": "https://nautil.us/rss/all",
+      "replacement": "https://nautil.us/feed/",
+      "reason": "Connection closed / HTTP 404 behavior",
+      "deprecated_at": "2026-02-26T18:35:00"
+    },
+    {
+      "original_url": "https://boeing.mediaroom.com/rss",
+      "replacement": "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss",
+      "reason": "HTTP 404",
+      "deprecated_at": "2026-02-26T18:43:00"
+    }
+  ],
+  "email": {
+    "enabled": true,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 465,
+    "use_ssl": true,
+    "use_starttls": false,
+    "username": "xjiangping@gmail.com",
+    "from_email": "xjiangping@gmail.com",
+    "to_emails": [
+      "xuconnor@163.com"
+    ],
+    "subject": "TrendAgent Daily Report"
+  },
+  "discord": {
+    "enabled": true,
+    "username": "TrendAgent",
+    "send_report_embeds": true,
+    "max_embed_messages": 3,
+    "max_embeds_per_message": 5,
+    "embed_color": 2844336
+  }
+}
+

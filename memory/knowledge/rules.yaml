@@ -1,0 +1,3 @@
+freshness_window_days: 7
+dedupe_by_normalized_url: true
+max_items_per_feed: 3

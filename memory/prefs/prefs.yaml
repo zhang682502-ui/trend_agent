@@ -1,0 +1,24 @@
+agent_id: TrendAgent-Local-01
+timezone: America/New_York
+language: en
+
+max_items_per_section: 3
+dedupe_window_days: 7
+
+topic_weights:
+  technology: 1.0
+  politics: 1.0
+  finance: 1.0
+  economic: 1.0
+  science: 1.0
+  culture: 1.0
+  aviation: 1.0
+
+allow_sources: []
+deny_sources: []
+allow_domains: []
+deny_domains: []
+
+interaction:
+  enable_query_mode: true
+  default_query_days: 7

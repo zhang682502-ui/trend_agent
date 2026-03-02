@@ -1,0 +1,383 @@
+{
+  "feeds": {
+    "technology__https_openai_com_blog_rss_xml": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:47",
+      "last_success_url": "https://openai.com/blog/rss.xml",
+      "configured_urls": [
+        "https://openai.com/blog/rss.xml"
+      ],
+      "primary_unhealthy": false
+    },
+    "technology__https_blog_google_technology_ai_rss": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:49",
+      "last_success_url": "https://blog.google/technology/ai/rss/",
+      "configured_urls": [
+        "https://blog.google/technology/ai/rss/"
+      ],
+      "primary_unhealthy": false
+    },
+    "politics__white_house": {
+      "active_index": 1,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:53",
+      "last_success_url": "https://www.whitehouse.gov/sitemap_index.xml",
+      "configured_urls": [
+        "https://www.whitehouse.gov/sitemap.xml",
+        "https://www.whitehouse.gov/sitemap_index.xml",
+        "https://www.whitehouse.gov/post-sitemap2.xml",
+        "https://www.govinfo.gov/rss/dcpd.xml"
+      ],
+      "primary_unhealthy": true,
+      "last_error_at": "2026-02-28T22:27:21",
+      "last_error_url": "https://www.whitehouse.gov/sitemap.xml",
+      "last_switch_at": "2026-02-28T22:27:21",
+      "last_switch_reason": "2 consecutive failures"
+    },
+    "politics__gov_uk": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:53",
+      "last_success_url": "https://www.gov.uk/search/news-and-communications.atom",
+      "configured_urls": [
+        "https://www.gov.uk/search/news-and-communications.atom",
+        "https://www.gov.uk/search/all.atom?content_purpose_supergroup%5B%5D=news_and_communications",
+        "https://www.state.gov/rss-feed/press-releases/feed/",
+        "https://www.state.gov/rss-feed/department-press-briefings/feed/"
+      ],
+      "primary_unhealthy": false
+    },
+    "politics__primary_sources_https_ec_europa_eu_commission_presscorner_api_rss": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-02-26T19:15:52",
+      "last_success_url": "https://ec.europa.eu/commission/presscorner/api/rss",
+      "configured_urls": [
+        "https://ec.europa.eu/commission/presscorner/api/rss"
+      ],
+      "primary_unhealthy": false
+    },
+    "politics__reuters": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:56",
+      "last_success_url": "https://www.reuters.com/arc/outboundfeeds/news-sitemap/?outputType=xml",
+      "configured_urls": [
+        "https://www.reuters.com/arc/outboundfeeds/news-sitemap/?outputType=xml",
+        "https://www.reuters.com/arc/outboundfeeds/sitemap/?outputType=xml",
+        "https://www.theguardian.com/politics/rss"
+      ],
+      "primary_unhealthy": false
+    },
+    "politics__politico": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:57",
+      "last_success_url": "https://rss.politico.com/politics-news.xml",
+      "configured_urls": [
+        "https://rss.politico.com/politics-news.xml",
+        "https://rss.politico.com/whitehouse.xml"
+      ],
+      "primary_unhealthy": false
+    },
+    "politics__media_reporting_http_feeds_bbci_co_uk_news_politics_rss_xml": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-02-26T19:06:53",
+      "last_success_url": "http://feeds.bbci.co.uk/news/politics/rss.xml",
+      "configured_urls": [
+        "http://feeds.bbci.co.uk/news/politics/rss.xml"
+      ]
+    },
+    "finance__https_www_federalreserve_gov_feeds_press_all_xml": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:58",
+      "last_success_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "configured_urls": [
+        "https://www.federalreserve.gov/feeds/press_all.xml"
+      ],
+      "primary_unhealthy": false
+    },
+    "finance__https_www_ecb_europa_eu_rss_press_html": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:10:59",
+      "last_success_url": "https://www.ecb.europa.eu/rss/press.html",
+      "configured_urls": [
+        "https://www.ecb.europa.eu/rss/press.html"
+      ],
+      "primary_unhealthy": false
+    },
+    "science__https_www_nature_com_nature_rss": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:11:15",
+      "last_success_url": "https://www.nature.com/nature.rss",
+      "configured_urls": [
+        "https://www.nature.com/nature.rss"
+      ],
+      "primary_unhealthy": false
+    },
+    "science__https_www_sciencedaily_com_rss_top_xml": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:11:16",
+      "last_success_url": "https://www.sciencedaily.com/rss/top.xml",
+      "configured_urls": [
+        "https://www.sciencedaily.com/rss/top.xml"
+      ],
+      "primary_unhealthy": false
+    },
+    "culture__https_aeon_co_feed_rss": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:11:16",
+      "last_success_url": "https://aeon.co/feed.rss",
+      "configured_urls": [
+        "https://aeon.co/feed.rss"
+      ],
+      "primary_unhealthy": false
+    },
+    "culture__nautilus": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:11:16",
+      "last_success_url": "https://nautil.us/feed/",
+      "configured_urls": [
+        "https://nautil.us/feed/",
+        "https://nautil.us/feed"
+      ],
+      "primary_unhealthy": false
+    },
+    "aviation__https_www_nasa_gov_rss_dyn_breaking_news_rss": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:11:17",
+      "last_success_url": "https://www.nasa.gov/rss/dyn/breaking_news.rss",
+      "configured_urls": [
+        "https://www.nasa.gov/rss/dyn/breaking_news.rss"
+      ],
+      "primary_unhealthy": false
+    },
+    "aviation__boeing": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "last_success_at": "2026-03-01T21:11:18",
+      "last_success_url": "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss",
+      "configured_urls": [
+        "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss",
+        "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss&l=50"
+      ],
+      "primary_unhealthy": false
+    },
+    "politics__us_federal_register": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-27T09:01:07",
+      "last_success_url": "https://www.govinfo.gov/rss/fr.xml",
+      "configured_urls": [
+        "https://www.govinfo.gov/rss/fr.xml",
+        "https://ec.europa.eu/commission/presscorner/api/rss"
+      ]
+    },
+    "politics__us_presidential_documents": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-27T13:45:57",
+      "last_success_url": "https://www.govinfo.gov/rss/dcpd.xml",
+      "configured_urls": [
+        "https://www.govinfo.gov/rss/dcpd.xml"
+      ]
+    },
+    "politics__us_state_press_releases": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-27T13:45:58",
+      "last_success_url": "https://www.state.gov/rss-feed/press-releases/feed/",
+      "configured_urls": [
+        "https://www.state.gov/rss-feed/press-releases/feed/",
+        "https://www.state.gov/rss-feed/department-press-briefings/feed/"
+      ]
+    },
+    "politics__media_reporting_https_feeds_bbci_co_uk_news_politics_rss_xml": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-26T19:15:55",
+      "last_success_url": "https://feeds.bbci.co.uk/news/politics/rss.xml",
+      "configured_urls": [
+        "https://feeds.bbci.co.uk/news/politics/rss.xml"
+      ]
+    },
+    "politics__guardian_politics": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-26T19:22:29",
+      "last_success_url": "https://www.theguardian.com/politics/rss",
+      "configured_urls": [
+        "https://www.theguardian.com/politics/rss"
+      ]
+    },
+    "politics__eu_commission_presscorner": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-26T19:22:26",
+      "last_success_url": "https://ec.europa.eu/commission/presscorner/api/rss",
+      "configured_urls": [
+        "https://ec.europa.eu/commission/presscorner/api/rss"
+      ]
+    },
+    "politics__bbc_politics": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:10:58",
+      "last_success_url": "https://feeds.bbci.co.uk/news/politics/rss.xml",
+      "configured_urls": [
+        "https://feeds.bbci.co.uk/news/politics/rss.xml"
+      ]
+    },
+    "politics__china_gov_hksar": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-27T09:05:42",
+      "last_success_url": "https://www.info.gov.hk/gia/rss/general_en.xml",
+      "configured_urls": [
+        "https://www.info.gov.hk/gia/rss/general_en.xml",
+        "https://www.news.gov.hk/en/common/html/topstories.rss.xml",
+        "https://ec.europa.eu/commission/presscorner/api/rss"
+      ]
+    },
+    "economic__econ_boc": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-02-27T13:24:34",
+      "last_success_url": "https://www.bankofcanada.ca/feed/",
+      "configured_urls": [
+        "https://www.bankofcanada.ca/feed/"
+      ]
+    },
+    "economic__econ_bls_empsit": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:11:14",
+      "last_success_url": "https://www.bls.gov/feed/empsit.rss",
+      "configured_urls": [
+        "https://www.bls.gov/feed/empsit.rss"
+      ]
+    },
+    "economic__econ_bls_cpi": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:11:14",
+      "last_success_url": "https://www.bls.gov/feed/cpi.rss",
+      "configured_urls": [
+        "https://www.bls.gov/feed/cpi.rss"
+      ]
+    },
+    "economic__econ_hk_censtatd": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:11:14",
+      "last_success_url": "https://www.censtatd.gov.hk/data/en/press_release/rss.xml",
+      "configured_urls": [
+        "https://www.censtatd.gov.hk/data/en/press_release/rss.xml"
+      ]
+    },
+    "politics__china_gov_mainland": {
+      "last_error_at": "2026-02-27T09:16:56",
+      "last_error_url": "https://www.gov.cn/zhengce/zuixin/index.htm",
+      "configured_urls": [
+        "https://www.gov.cn/yaowen/liebiao/YAOWENLIEBIAO.json",
+        "https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json",
+        "https://ec.europa.eu/commission/presscorner/api/rss"
+      ],
+      "consecutive_failures": 0,
+      "active_index": 1,
+      "primary_unhealthy": true,
+      "last_switch_at": "2026-02-27T09:16:55",
+      "last_switch_reason": "2 consecutive failures",
+      "last_success_at": "2026-03-01T21:10:54",
+      "last_success_url": "https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json"
+    },
+    "politics__un_news": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:10:56",
+      "last_success_url": "https://www.un.org/press/en/rss.xml",
+      "configured_urls": [
+        "https://www.un.org/press/en/rss.xml",
+        "https://news.un.org/feed/subscribe/en/news/all/rss.xml"
+      ],
+      "last_error_at": "2026-02-27T12:42:57",
+      "last_error_url": "https://news.un.org/feed/subscribe/en/news/all/rss.xml"
+    },
+    "economic__econ_us_fed": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:10:59",
+      "last_success_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "configured_urls": [
+        "https://www.federalreserve.gov/feeds/press_all.xml"
+      ]
+    },
+    "economic__econ_un": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:11:00",
+      "last_success_url": "https://www.un.org/press/en/rss.xml",
+      "configured_urls": [
+        "https://www.un.org/press/en/rss.xml",
+        "https://news.un.org/feed/subscribe/en/news/all/rss.xml"
+      ]
+    },
+    "economic__econ_china_state_council": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:11:01",
+      "last_success_url": "https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json",
+      "configured_urls": [
+        "https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json",
+        "https://www.gov.cn/yaowen/liebiao/YAOWENLIEBIAO.json"
+      ]
+    },
+    "economic__econ_ecb": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:11:02",
+      "last_success_url": "https://www.ecb.europa.eu/rss/press.html",
+      "configured_urls": [
+        "https://www.ecb.europa.eu/rss/press.html"
+      ]
+    },
+    "economic__econ_eurostat": {
+      "active_index": 0,
+      "consecutive_failures": 0,
+      "primary_unhealthy": false,
+      "last_success_at": "2026-03-01T21:11:13",
+      "last_success_url": "https://ec.europa.eu/eurostat/api/dissemination/catalogue/rss/en/statistics-update.rss",
+      "configured_urls": [
+        "https://ec.europa.eu/eurostat/api/dissemination/catalogue/rss/en/statistics-update.rss"
+      ]
+    }
+  }
+}

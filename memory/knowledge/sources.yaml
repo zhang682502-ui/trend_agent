@@ -1,0 +1,6 @@
+priority:
+  - official
+  - primary_media
+  - secondary_media
+trust_rules:
+  require_two_sources_for_major_claims: true

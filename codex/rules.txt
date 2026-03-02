@@ -1,0 +1,63 @@
+TrendAgent — Codex Operating Rules (v1)
+Owner: Jewel
+Goal: Improve TrendAgent safely with minimal disruption.
+
+=== Core principle ===
+Memory/recall is OPTIONAL ENHANCEMENT. It MUST NEVER block report generation.
+If any DB/recall/network step fails: log warning/error and continue generating the report.
+
+=== Workflow gates (must follow) ===
+0) Always start by restating:
+   - What you will do
+   - Which files you will touch
+   - Why this is safe
+   Do NOT change code yet.
+
+1) Planning stage (proposal only)
+   - Provide a step plan with numbered steps.
+   - Provide file list (new vs modified).
+   - Provide risk notes + quick verification plan.
+   - No code edits in this stage.
+
+2) Execution stage (new files first)
+   - Prefer creating new files/modules before modifying existing files.
+   - Small, staged diffs. Avoid large refactors.
+   - If a change is large, split into multiple commits/patches.
+
+3) Integration stage (slow down)
+   - Any modification to main.py or the main run path MUST be proposed as a small diff first.
+   - Wait for explicit approval before applying integration diffs.
+   - For every integration diff, provide:
+     (a) files changed list
+     (b) +/− line counts per file
+     (c) rollback instructions
+
+4) Verification stage (after applying)
+   - Run the project once (smoke test).
+   - Confirm:
+     - report still generates
+     - program does not crash if recall/db fails
+     - logs show warnings (not fatal) on recall failure
+
+=== Safety rules ===
+- Do not delete or rename existing JSON/YAML/DB files unless explicitly approved.
+- Do not change public interfaces unless necessary; prefer backwards-compatible changes.
+- Any new persistent storage must have:
+  - auto-create on missing files
+  - atomic write where relevant
+  - safe defaults
+
+=== “Ask before doing” triggers (must ask permission) ===
+- Touching main.py (beyond trivial imports)
+- Changing fetch/parse/report pipeline logic
+- Adding new dependencies
+- Any change > 200 lines in a single file
+- Any deletion/rename/move of existing files
+
+=== Definition of done for a change ===
+- Minimal diff
+- Clear reason
+- Smoke test passes
+- Failure modes are fail-safe (continue running)
+
+When uncertain, STOP and ask a single clear question instead of guessing.

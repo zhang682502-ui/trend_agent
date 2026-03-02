@@ -1,0 +1,2 @@
+[2026-03-01T20:44:04] run_id=20260301_204323 event=email_error detail={'type': 'email_error', 'error': 'ValueError: Email config missing required fields: password'}
+[2026-03-01T20:44:04] run_id=20260301_204323 event=discord_error detail={'type': 'discord_error', 'error': 'ValueError: Discord config missing webhook URL'}

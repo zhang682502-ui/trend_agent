@@ -1,0 +1,127 @@
+--
+
+🔥 PART 1 — Essential Windows Keyboard Shortcuts
+
+🧠 System Control
+
+Action	Shortcut
+
+Open Run dialog	Win + R
+Open Terminal (PowerShell)	Win + X, then I
+Lock computer	Win + L
+Task Manager	Ctrl + Shift + Esc
+Screenshot tool	Win + Shift + S
+Switch windows	Alt + Tab
+Open File Explorer	Win + E
+Show desktop	Win + D
+
+
+
+---
+
+🔥 PART 2 — Run Commands (Win + R or PowerShell)
+
+You can type these anywhere (Run box or PowerShell).
+
+🧭 System Tools
+
+What	Command
+
+Task Scheduler	taskschd.msc
+Services	services.msc
+Device Manager	devmgmt.msc
+Disk Management	diskmgmt.msc
+Control Panel	control
+Environment Variables	sysdm.cpl
+
+
+
+---
+
+🔥 PART 3 — PowerShell Navigation (Core Operator Mode)
+
+📁 Move Around
+
+pwd              # where am I
+ls               # list files
+cd foldername    # enter folder
+cd ..            # go up
+cd ~             # go home
+clear            # clean screen
+
+
+---
+
+📂 Create / Delete
+
+mkdir TestFolder
+New-Item test.txt
+Remove-Item test.txt
+
+
+---
+
+▶ Run Script
+
+python main.py
+.\script.ps1
+
+
+---
+
+🔥 PART 4 — Task Scheduler From Command Line
+
+List tasks
+
+schtasks /Query
+
+Run task immediately
+
+schtasks /Run /TN "TaskName"
+
+Delete task
+
+schtasks /Delete /TN "TaskName" /F
+
+
+---
+
+🔥 PART 5 — VS Code (Operator Shortcuts)
+
+Action	Shortcut
+
+Open terminal	Ctrl + 
+Command palette	Ctrl + Shift + P
+Quick file open	Ctrl + P
+Search in project	Ctrl + Shift + F
+Split editor	Ctrl + \
+Close tab	Ctrl + W
+
+
+
+---
+
+🔥 PART 6 — Launch Apps from Command Line
+
+You don’t need Start menu.
+
+code .          # open VS Code here
+notepad
+calc
+explorer .
+chrome
+
+
+---
+
+🔥 PART 7 — Become Even Faster
+
+Use TAB completion:
+
+Type:
+
+task
+
+Then press Tab.
+
+It auto-completes.
