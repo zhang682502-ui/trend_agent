@@ -34,6 +34,7 @@ from memory.recall_store import (
     close as recall_close,
 )
 
+
 BASE_DIR = Path(__file__).resolve().parent
 
 JSON_DIR      = BASE_DIR / "Json"
@@ -2066,7 +2067,7 @@ def md_to_simple_html(
     return "\n".join(out)
 
 
-def main(start_telegram: bool = True, dev_mode: bool = False) -> int:
+def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
     if not RUN_TRIGGER_LOCK.acquire(blocking=False):
         logger.warning("Run requested while another run is active")
         return 2
@@ -2080,8 +2081,6 @@ def main(start_telegram: bool = True, dev_mode: bool = False) -> int:
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     start_dt = datetime.now()
-    exit_code = 0
-    keep_alive = False
 
     status = {
     "agent": {
@@ -2599,8 +2598,8 @@ def main(start_telegram: bool = True, dev_mode: bool = False) -> int:
             append_history(status)
         except Exception:
             logger.exception("append_history failed (non-fatal)")
-        exit_code = 0
-        keep_alive = start_telegram and stay_alive and TELEGRAM_THREAD is not None
+        # Return code 0 means success
+        return 0
 
     except Exception as e:
         end_dt = datetime.now()
@@ -2652,8 +2651,6 @@ def main(start_telegram: bool = True, dev_mode: bool = False) -> int:
         logger.error("========== Trend Agent RUN FAILED ==========")
         logger.error(err_text)
         logger.error(tb)
-        exit_code = 1
-        keep_alive = start_telegram and stay_alive and TELEGRAM_THREAD is not None
     finally:
         _release_run_file_lock(lock_fd)
         RUN_TRIGGER_LOCK.release()
@@ -2663,14 +2660,7 @@ def main(start_telegram: bool = True, dev_mode: bool = False) -> int:
             except Exception:
                 logger.exception("recall commit failed during shutdown; ignoring")
             recall_close(recall_conn)
-    if keep_alive:
-        logger.info("TrendAgent idle; Telegram polling alive (Ctrl+C to stop)")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Telegram stay-alive interrupted by user; shutting down cleanly")
-    return exit_code
+    return 1
       
 def write_json_atomic(path: Path, data):
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -2719,7 +2709,6 @@ def append_history(status: dict, keep_last: int = 200):
         # Return non-zero means failure (useful for schedulers)
     # return 1
 
-
 def run_telegram_mode() -> int:
     global TELEGRAM_THREAD
     runtime_secrets = _load_runtime_secrets()
@@ -2731,7 +2720,7 @@ def run_telegram_mode() -> int:
         return 1
     if TELEGRAM_THREAD is None:
         try:
-            TELEGRAM_THREAD = start_telegram_polling(token, handle_telegram_message, logger=logger)
+            TELEGRAM_THREAD = start_telegram_polling(token=token, message_handler=handle_telegram_message, logger=logger)
             logger.info("Telegram polling started")
         except Exception:
             logger.exception("Failed to start Telegram polling")
@@ -2763,4 +2752,3 @@ if __name__ == "__main__":
     if args.once:
         raise SystemExit(main(start_telegram=False))
     raise SystemExit(main(start_telegram=False))
-

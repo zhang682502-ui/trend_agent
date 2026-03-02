@@ -14,3 +14,6 @@ Json/status.json
 Json/feed_failover_state.json
 memory/ops/*.json
 memory/recall/*.sqlite
+
+__pycache__/
+*.pyc
