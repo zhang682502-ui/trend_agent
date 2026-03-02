@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 import argparse
 import os
 import sys
@@ -172,9 +172,7 @@ def _load_runtime_secrets() -> dict | None:
     try:
         return load_secrets()
     except SecretConfigError as exc:
-        message = f"Secret config error: {exc}"
-        logger.error(message)
-        print(message, file=sys.stderr)
+        message = f"Secret config error
         return None
 
 
