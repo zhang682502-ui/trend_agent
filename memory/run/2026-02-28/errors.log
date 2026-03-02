@@ -1,2 +1,0 @@
-[2026-02-28T21:44:34] run_id=20260228_214402 event=feed_error detail={'type': 'feed_error', 'url': 'https://www.whitehouse.gov/sitemap.xml', 'feed': 'White House', 'error': 'FeedFetchError: HTTP 403 Forbidden'}
-[2026-02-28T22:27:58] run_id=20260228_222717 event=discord_error detail={'type': 'discord_error', 'error': 'RuntimeError: Discord webhook HTTP 404: {"message": "Unknown Webhook", "code": 10015}'}

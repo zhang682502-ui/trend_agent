@@ -2,3 +2,15 @@ password.txt
 secret.json
 *.log
 logs/
+# runtime / generated
+logs/
+report/
+report_html/
+memory/run/
+
+# state / cache
+Json/history*.json
+Json/status.json
+Json/feed_failover_state.json
+memory/ops/*.json
+memory/recall/*.sqlite

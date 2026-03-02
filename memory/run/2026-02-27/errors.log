@@ -1,1 +1,0 @@
-[2026-02-27T12:43:14] run_id=20260227_124244 event=feed_error detail={'type': 'feed_error', 'url': 'https://news.un.org/feed/subscribe/en/news/all/rss.xml', 'feed': 'United Nations', 'error': 'FeedFetchError: Parse error: <unknown>:2:0: not well-formed (invalid token)'}
