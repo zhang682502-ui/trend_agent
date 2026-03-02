@@ -1,2 +1,4 @@
 password.txt
 secret.json
+*.log
+logs/
