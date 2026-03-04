@@ -7,6 +7,7 @@ import json
 from datetime import date, datetime, timedelta
 import traceback
 import re
+import string
 import html as html_lib
 import logging
 import time
@@ -410,6 +411,7 @@ def _telegram_alias_map() -> dict[str, str]:
         "help": "help",
         "last": "last",
         "hl": "highlights",
+        "highlight": "highlights",
         "highlights": "highlights",
         "summary": "highlights",
         "stats": "stats",
@@ -442,15 +444,50 @@ def _telegram_command_text_from_transcription(text: str) -> str:
     return stripped
 
 
-def _should_route_transcribed_command(text: str) -> bool:
-    stripped = (text or "").strip()
+def _voice_command_tokens(text: str) -> list[str]:
+    strip_chars = string.punctuation + "“”‘’"
+    collapsed = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not collapsed:
+        return []
+    tokens = [part.strip(strip_chars) for part in collapsed.split(" ")]
+    return [token for token in tokens if token]
+
+
+def parse_voice_command(transcript: str, duration_sec: float | None) -> str | None:
+    stripped = re.sub(r"\s+", " ", (transcript or "").strip())
     if not stripped:
-        return False
-    if stripped.startswith("/"):
-        return True
-    if stripped.lower().startswith("cmd:"):
-        return True
-    return bool(_telegram_command_name(stripped))
+        return None
+
+    normalized = stripped.lower()
+    if normalized.startswith("/"):
+        command_name = _telegram_command_name(stripped)
+        return f"/{command_name}" if command_name else None
+    if normalized.startswith("cmd:"):
+        command_name = _telegram_command_name(_telegram_command_text_from_transcription(stripped))
+        return f"/{command_name}" if command_name else None
+
+    tokens = _voice_command_tokens(stripped)
+    if not tokens:
+        return None
+
+    if tokens[0] in {"slash", "cmd"}:
+        fallback_text = "/" + " ".join(tokens[1:])
+        command_name = _telegram_command_name(fallback_text)
+        return f"/{command_name}" if command_name else None
+
+    if len(tokens) > 3:
+        return None
+    if duration_sec is not None and duration_sec > 3:
+        return None
+
+    canonical_tokens = [_telegram_alias_map().get(token, "") for token in tokens]
+    if not canonical_tokens or not canonical_tokens[0]:
+        return None
+    if any(not token for token in canonical_tokens):
+        return None
+    if len(set(canonical_tokens)) != 1:
+        return None
+    return f"/{canonical_tokens[0]}"
 
 
 def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
@@ -486,7 +523,7 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
     if cmd == "help":
         return (
             "Commands: ping, status, report/run, hl/highlights (alias: summary), last, help, stats, errors. "
-            "Voice: send a voice/audio message for transcription; prefix with cmd: or / to run a command."
+            "Voice: short commands like ping/status/help run directly; longer speech is transcribed and echoed."
         )
 
     if cmd == "last":
@@ -526,16 +563,30 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
 def _handle_telegram_voice_message(chat_id: int, message: dict, token: str) -> str:
     model_name = _telegram_voice_model_name()
     logger.info("TG voice recv chat_id=%s model=%s", chat_id, model_name)
+    media_payload = message.get("voice") if isinstance(message.get("voice"), dict) else message.get("audio")
+    duration_sec = None
+    if isinstance(media_payload, dict) and media_payload.get("duration") is not None:
+        try:
+            duration_sec = float(media_payload.get("duration") or 0)
+        except (TypeError, ValueError):
+            duration_sec = None
     transcription = transcribe_telegram_media(token=token, message=message, logger=logger, model_size=model_name)
     logger.info("TG voice text chat_id=%s text=%r", chat_id, transcription)
-    response = f"Transcription: {transcription}"
+    parsed_command = parse_voice_command(transcription, duration_sec=duration_sec)
+    executed = bool(parsed_command)
+    logger.info(
+        "TG voice command_parse chat_id=%s duration=%s transcript=%r parsed_command=%r executed=%s",
+        chat_id,
+        duration_sec,
+        transcription,
+        parsed_command,
+        executed,
+    )
 
-    if not _should_route_transcribed_command(transcription):
-        return response
+    if not parsed_command:
+        return f"Transcription: {transcription}"
 
-    command_text = _telegram_command_text_from_transcription(transcription)
-    command_reply = _handle_telegram_text(chat_id, command_text, source="voice")
-    return f"{response}\n\n{command_reply}"
+    return _handle_telegram_text(chat_id, parsed_command, source="voice")
 
 
 def handle_telegram_message(chat_id: int, text: str, message: dict | None = None, token: str | None = None) -> str:
