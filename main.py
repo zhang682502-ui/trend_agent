@@ -1,4 +1,7 @@
-﻿from pathlib import Path
+﻿from core.env_bootstrap import refresh_windows_path_from_registry
+
+refresh_windows_path_from_registry()
+from pathlib import Path
 import argparse
 import os
 import sys
@@ -27,7 +30,9 @@ warnings.filterwarnings("ignore", category=UserWarning)
 from config.config_loader import CONFIG_PATH as RUNTIME_CONFIG_PATH, ConfigError, load_config
 from config.secrets_loader import SecretConfigError, load_secrets
 from core.delivery import deliver_to_all
-from core.telegram_poll import start_telegram_polling
+from core.health import format_health_text, record_command, record_report_trigger, reset_health_state
+from core.runtime_guard import RuntimeAlreadyRunning, acquire_lock
+from core.telegram_poll import TelegramConflictError, run_telegram_forever, start_telegram_polling
 from core.voice import VoiceTranscriptionError, preload_fast_voice_model, transcribe_telegram_media
 from memory.identity import canonicalize_url, make_item_id
 from memory.ops_store import load_ops_memory, save_ops_memory_atomic, update_ops_after_run
@@ -421,6 +426,7 @@ def _telegram_alias_map() -> dict[str, str]:
         "summary": "highlights",
         "stats": "stats",
         "errors": "errors",
+        "health": "health",
     }
 
 
@@ -501,6 +507,7 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
 
     if cmd:
         logger.info("TG cmd=%s chat_id=%s source=%s", cmd, chat_id, source)
+        record_command(f"/{cmd}")
 
     if cmd == "ping":
         return "pong ?"
@@ -511,6 +518,7 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
     if cmd == "report":
         if RUN_TRIGGER_LOCK.locked():
             return "Report already running ?"
+        record_report_trigger()
 
         def run_report() -> None:
             exit_code = -1
@@ -527,7 +535,7 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
 
     if cmd == "help":
         return (
-            "Commands: ping, status, report/run, hl/highlights (alias: summary), last, help, stats, errors. "
+            "Commands: ping, status, report/run, hl/highlights (alias: summary), last, help, stats, errors, health. "
             "Voice: short commands like ping/status/help run directly; longer speech is transcribed and echoed."
         )
 
@@ -561,6 +569,9 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
             f"items_new={int(metrics.get('items_new', 0) or 0)} "
             f"items_duplicates={int(metrics.get('items_duplicates', 0) or 0)}"
         )
+
+    if cmd == "health":
+        return format_health_text()
 
     return "I didn't understand. Try: ping, status, report/run, hl/highlights, last, help, or send a voice note."
 
@@ -2855,7 +2866,6 @@ def append_history(status: dict, keep_last: int = 200):
     # return 1
 
 def run_telegram_mode() -> int:
-    global TELEGRAM_THREAD
     runtime_secrets = _load_runtime_secrets()
     if runtime_secrets is None:
         return 1
@@ -2863,20 +2873,22 @@ def run_telegram_mode() -> int:
     if not token:
         logger.error("telegram_bot_token not set; Telegram polling disabled")
         return 1
-    if TELEGRAM_THREAD is None:
-        try:
-            preload_fast_voice_model(logger=logger)
-            TELEGRAM_THREAD = start_telegram_polling(token=token, message_handler=handle_telegram_message, logger=logger)
-            logger.info("Telegram polling started")
-        except Exception:
-            logger.exception("Failed to start Telegram polling")
-            return 1
-    logger.info("TrendAgent idle; Telegram polling alive (Ctrl+C to stop)")
     try:
-        while True:
-            time.sleep(1)
+        with acquire_lock("telegram"):
+            reset_health_state()
+            preload_fast_voice_model(logger=logger)
+            logger.info("Telegram polling started")
+            run_telegram_forever(token=token, message_handler=handle_telegram_message, logger=logger)
     except KeyboardInterrupt:
         logger.info("Telegram stay-alive interrupted by user; shutting down cleanly")
+    except TelegramConflictError:
+        logger.error("Telegram polling stopped due to getUpdates conflict. Exiting.")
+        return 1
+    except RuntimeAlreadyRunning as exc:
+        logger.info("Telegram already running (pid=%s). Exiting.", exc.pid)
+    except Exception:
+        logger.exception("Failed to run Telegram polling")
+        return 1
     return 0
 
 
