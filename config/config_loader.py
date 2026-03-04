@@ -6,6 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULT_CONFIG = {
     "telegram_stay_alive": True,
+    "telegram_voice_model": "small",
     "open_browser": True,
 }
 

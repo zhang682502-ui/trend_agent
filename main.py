@@ -22,6 +22,7 @@ from config.config_loader import CONFIG_PATH as RUNTIME_CONFIG_PATH, ConfigError
 from config.secrets_loader import SecretConfigError, load_secrets
 from core.delivery import deliver_to_all
 from core.telegram_poll import start_telegram_polling
+from core.voice import VoiceTranscriptionError, transcribe_telegram_media
 from memory.identity import canonicalize_url, make_item_id
 from memory.ops_store import load_ops_memory, save_ops_memory_atomic, update_ops_after_run
 from memory.prefs import load_prefs
@@ -400,13 +401,8 @@ def _telegram_highlights_text() -> str:
         return f"Could not extract highlights for run_id={run_id}"
 
 
-def handle_telegram_message(chat_id: int, text: str) -> str:
-    logger.info("TG recv chat_id=%s text=%r", chat_id, text)
-    normalized = (text or "").strip().lower()
-    if normalized.startswith("/"):
-        normalized = normalized[1:]
-    cmd = normalized.split(None, 1)[0].split("@", 1)[0] if normalized else ""
-    alias_map = {
+def _telegram_alias_map() -> dict[str, str]:
+    return {
         "ping": "ping",
         "status": "status",
         "report": "report",
@@ -419,10 +415,50 @@ def handle_telegram_message(chat_id: int, text: str) -> str:
         "stats": "stats",
         "errors": "errors",
     }
-    cmd = alias_map.get(cmd, "")
+
+
+def _telegram_command_name(text: str) -> str:
+    normalized = (text or "").strip().lower()
+    if normalized.startswith("/"):
+        normalized = normalized[1:]
+    cmd = normalized.split(None, 1)[0].split("@", 1)[0] if normalized else ""
+    return _telegram_alias_map().get(cmd, "")
+
+
+def _telegram_voice_model_name() -> str:
+    try:
+        config = load_config()
+    except ConfigError as exc:
+        logger.warning("TG voice config load failed; using default model small: %s", exc)
+        return "small"
+    model_name = str(config.get("telegram_voice_model") or "").strip()
+    return model_name or "small"
+
+
+def _telegram_command_text_from_transcription(text: str) -> str:
+    stripped = (text or "").strip()
+    if stripped.lower().startswith("cmd:"):
+        return stripped[4:].strip()
+    return stripped
+
+
+def _should_route_transcribed_command(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if stripped.startswith("/"):
+        return True
+    if stripped.lower().startswith("cmd:"):
+        return True
+    return bool(_telegram_command_name(stripped))
+
+
+def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
+    logger.info("TG recv chat_id=%s source=%s text=%r", chat_id, source, text)
+    cmd = _telegram_command_name(text)
 
     if cmd:
-        logger.info("TG cmd=%s chat_id=%s", cmd, chat_id)
+        logger.info("TG cmd=%s chat_id=%s source=%s", cmd, chat_id, source)
 
     if cmd == "ping":
         return "pong ?"
@@ -448,7 +484,10 @@ def handle_telegram_message(chat_id: int, text: str) -> str:
         return "Report triggered ?"
 
     if cmd == "help":
-        return "Commands: ping, status, report/run, hl/highlights (alias: summary), last, help, stats, errors"
+        return (
+            "Commands: ping, status, report/run, hl/highlights (alias: summary), last, help, stats, errors. "
+            "Voice: send a voice/audio message for transcription; prefix with cmd: or / to run a command."
+        )
 
     if cmd == "last":
         return _telegram_last_run_id_text()
@@ -481,7 +520,39 @@ def handle_telegram_message(chat_id: int, text: str) -> str:
             f"items_duplicates={int(metrics.get('items_duplicates', 0) or 0)}"
         )
 
-    return "I didn't understand. Try: ping, status, report/run, hl/highlights, last, help."
+    return "I didn't understand. Try: ping, status, report/run, hl/highlights, last, help, or send a voice note."
+
+
+def _handle_telegram_voice_message(chat_id: int, message: dict, token: str) -> str:
+    model_name = _telegram_voice_model_name()
+    logger.info("TG voice recv chat_id=%s model=%s", chat_id, model_name)
+    transcription = transcribe_telegram_media(token=token, message=message, logger=logger, model_size=model_name)
+    logger.info("TG voice text chat_id=%s text=%r", chat_id, transcription)
+    response = f"Transcription: {transcription}"
+
+    if not _should_route_transcribed_command(transcription):
+        return response
+
+    command_text = _telegram_command_text_from_transcription(transcription)
+    command_reply = _handle_telegram_text(chat_id, command_text, source="voice")
+    return f"{response}\n\n{command_reply}"
+
+
+def handle_telegram_message(chat_id: int, text: str, message: dict | None = None, token: str | None = None) -> str:
+    has_voice = isinstance(message, dict) and isinstance(message.get("voice"), dict)
+    has_audio = isinstance(message, dict) and isinstance(message.get("audio"), dict)
+    if has_voice or has_audio:
+        if not token:
+            return "Voice transcription failed: Telegram bot token missing."
+        try:
+            return _handle_telegram_voice_message(chat_id, message or {}, token)
+        except VoiceTranscriptionError as exc:
+            logger.warning("TG voice transcription failed chat_id=%s error=%s", chat_id, exc)
+            return f"Voice transcription failed: {exc}"
+        except Exception:
+            logger.exception("TG voice transcription unexpected failure chat_id=%s", chat_id)
+            return "Voice transcription failed due to an unexpected error."
+    return _handle_telegram_text(chat_id, text, source="text")
 
 
 class FeedFetchError(RuntimeError):

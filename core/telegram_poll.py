@@ -34,6 +34,16 @@ def send_telegram_message(token: str, chat_id: int, text: str, timeout: int = 30
     )
 
 
+def _message_text(message: dict) -> str:
+    text = message.get("text")
+    if isinstance(text, str):
+        return text
+    caption = message.get("caption")
+    if isinstance(caption, str):
+        return caption
+    return ""
+
+
 def _poll_loop(token: str, message_handler, logger=None, poll_timeout: int = 25, idle_sleep: float = 1.0) -> None:
     offset = None
     while True:
@@ -71,12 +81,15 @@ def _poll_loop(token: str, message_handler, logger=None, poll_timeout: int = 25,
                 if chat.get("type") != "private":
                     continue
                 chat_id = chat.get("id")
-                text = message.get("text")
-                if not isinstance(chat_id, int) or not isinstance(text, str):
+                has_text = isinstance(message.get("text"), str)
+                has_voice = isinstance(message.get("voice"), dict)
+                has_audio = isinstance(message.get("audio"), dict)
+                if not isinstance(chat_id, int) or not (has_text or has_voice or has_audio):
                     continue
+                text = _message_text(message)
 
                 try:
-                    reply = message_handler(chat_id, text)
+                    reply = message_handler(chat_id, text, message, token)
                 except Exception:
                     if logger is not None:
                         logger.exception("Telegram message handler failed")

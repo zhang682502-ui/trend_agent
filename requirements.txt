@@ -1,2 +1,3 @@
 feedparser
+faster-whisper
 requests
