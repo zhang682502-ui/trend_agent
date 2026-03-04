@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 import logging
 import shutil
@@ -14,6 +15,7 @@ from core.voice_tuner import VoiceTuningError, transcribe_with_saved_or_benchmar
 BASE_DIR = Path(__file__).resolve().parent.parent
 VOICE_TMP_DIR = BASE_DIR / "data" / "tmp"
 FFMPEG_REFRESH_COMMAND = "$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"
+SHORT_COMMAND_MAX_DURATION_SECONDS = 3.0
 
 
 class VoiceTranscriptionError(RuntimeError):
@@ -83,6 +85,71 @@ def _extract_media_payload(message: dict) -> tuple[str, dict]:
     raise VoiceTranscriptionError("Telegram message did not contain a voice or audio attachment.")
 
 
+def _should_use_short_command_fast_path(duration_sec: float | None) -> bool:
+    return duration_sec is not None and duration_sec <= SHORT_COMMAND_MAX_DURATION_SECONDS
+
+
+@lru_cache(maxsize=2)
+def _load_short_command_model(model_name: str):
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise VoiceTranscriptionError(
+            "faster-whisper is not installed in the active environment. Install requirements.txt into the venv."
+        ) from exc
+
+    return WhisperModel(
+        model_name,
+        device="cpu",
+        compute_type="int8",
+        num_workers=1,
+    )
+
+
+def _transcribe_short_command_audio(wav_path: Path) -> dict:
+    last_error: Exception | None = None
+
+    try:
+        from faster_whisper import BatchedInferencePipeline
+    except ImportError as exc:
+        raise VoiceTranscriptionError(
+            "faster-whisper is not installed in the active environment. Install requirements.txt into the venv."
+        ) from exc
+
+    for model_name in ("tiny.en", "tiny"):
+        try:
+            model = _load_short_command_model(model_name)
+            pipeline = BatchedInferencePipeline(model=model)
+            segments, info = pipeline.transcribe(
+                str(wav_path),
+                language="en",
+                beam_size=1,
+                best_of=1,
+                temperature=0.0,
+                condition_on_previous_text=False,
+                batch_size=1,
+                vad_filter=True,
+                without_timestamps=True,
+            )
+            text = " ".join(segment.text.strip() for segment in segments if getattr(segment, "text", "").strip()).strip()
+            return {
+                "text": text,
+                "language": getattr(info, "language", "en"),
+                "duration_seconds": getattr(info, "duration", None),
+                "device": "cpu",
+                "compute_type": "int8",
+                "beam_size": 1,
+                "batch_size": 1,
+                "num_workers": 1,
+                "settings_source": "short_command_fast_path",
+                "model_name": model_name,
+            }
+        except Exception as exc:
+            last_error = exc
+
+    raise VoiceTranscriptionError(f"Short voice command transcription failed: {last_error}")
+
+
 def transcribe_telegram_media(
     token: str,
     message: dict,
@@ -124,19 +191,33 @@ def transcribe_telegram_media(
         source_path = temp_dir / f"input{source_suffix}"
         wav_path = temp_dir / "input.wav"
 
+        download_started_at = time.perf_counter()
         _download_file(f"https://api.telegram.org/file/bot{token}/{file_path}", source_path, timeout=timeout)
         if logger is not None:
-            logger.info("TG voice download complete path=%s", source_path)
+            logger.info(
+                "TG voice download complete path=%s elapsed=%.2fs",
+                source_path,
+                time.perf_counter() - download_started_at,
+            )
 
+        convert_started_at = time.perf_counter()
         _convert_to_wav(source_path, wav_path)
         if logger is not None:
-            logger.info("TG voice converted wav=%s", wav_path)
+            logger.info(
+                "TG voice converted wav=%s elapsed=%.2fs",
+                wav_path,
+                time.perf_counter() - convert_started_at,
+            )
 
-        runtime_result = transcribe_with_saved_or_benchmarked_settings(
-            sample_wav=str(wav_path),
-            model_size=model_size,
-            logger_override=logger,
-        )
+        transcribe_started_at = time.perf_counter()
+        if _should_use_short_command_fast_path(float(duration_hint) if duration_hint else None):
+            runtime_result = _transcribe_short_command_audio(wav_path)
+        else:
+            runtime_result = transcribe_with_saved_or_benchmarked_settings(
+                sample_wav=str(wav_path),
+                model_size=model_size,
+                logger_override=logger,
+            )
         text = str(runtime_result.get("text") or "").strip()
         if not text:
             raise VoiceTranscriptionError("No speech detected in the audio.")
@@ -150,7 +231,7 @@ def transcribe_telegram_media(
                     "batch=%s workers=%s source=%s language=%s duration=%s elapsed=%.2fs"
                 ),
                 media_kind,
-                model_size,
+                runtime_result.get("model_name") or model_size,
                 runtime_result.get("device"),
                 runtime_result.get("compute_type"),
                 runtime_result.get("beam_size"),
@@ -159,6 +240,11 @@ def transcribe_telegram_media(
                 runtime_result.get("settings_source"),
                 detected_language,
                 detected_duration,
+                time.perf_counter() - transcribe_started_at,
+            )
+            logger.info(
+                "TG voice pipeline complete kind=%s total_elapsed=%.2fs",
+                media_kind,
                 time.perf_counter() - started_at,
             )
         return text

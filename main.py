@@ -586,7 +586,15 @@ def _handle_telegram_voice_message(chat_id: int, message: dict, token: str) -> s
     if not parsed_command:
         return f"Transcription: {transcription}"
 
-    return _handle_telegram_text(chat_id, parsed_command, source="voice")
+    execute_started_at = time.perf_counter()
+    reply = _handle_telegram_text(chat_id, parsed_command, source="voice")
+    logger.info(
+        "TG voice execute chat_id=%s command=%r elapsed=%.2fs",
+        chat_id,
+        parsed_command,
+        time.perf_counter() - execute_started_at,
+    )
+    return reply
 
 
 def handle_telegram_message(chat_id: int, text: str, message: dict | None = None, token: str | None = None) -> str:
