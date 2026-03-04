@@ -316,6 +316,118 @@ def _parse_report_markdown(report_md: str) -> tuple[str | None, list[dict]]:
 
     return report_title, categories
 
+
+def _build_report_embeds(report_md: str, discord_cfg: dict) -> list[dict]:
+    _report_title, categories = _parse_report_markdown(report_md)
+    embeds: list[dict] = []
+    default_color = int(discord_cfg.get("embed_color", 0x2B6CB0))
+    max_embed_chars = 5800
+
+    category_colors = {
+        "technology": 0x2563EB,
+        "politics": 0xDC2626,
+        "finance": 0x059669,
+        "science": 0x7C3AED,
+        "culture": 0xEA580C,
+        "aviation": 0x0EA5E9,
+    }
+
+    for category in categories:
+        feeds = [f for f in category.get("feeds", []) if f.get("items")]
+        if not feeds:
+            continue
+
+        fields: list[dict] = []
+        for feed in feeds:
+            fields.append({
+                "name": _truncate(str(feed.get("name", "Feed")) or "Feed", 256),
+                "value": _feed_items_to_field_value(feed.get("items", [])),
+                "inline": False,
+            })
+
+        title_base = str(category.get("name", "Category")) or "Category"
+        category_color = category_colors.get(title_base.strip().lower(), default_color)
+        title_with_part_budget = _truncate(f"{title_base} (part 99/99)", 256)
+        base_embed_char_cost = len(title_with_part_budget)
+
+        field_groups: list[list[dict]] = []
+        current_group: list[dict] = []
+        current_chars = base_embed_char_cost
+
+        for field in fields:
+            field_chars = len(str(field.get("name", ""))) + len(str(field.get("value", "")))
+            would_exceed_chars = current_group and (current_chars + field_chars > max_embed_chars)
+            would_exceed_fields = len(current_group) >= 25
+            if would_exceed_chars or would_exceed_fields:
+                field_groups.append(current_group)
+                current_group = []
+                current_chars = base_embed_char_cost
+            current_group.append(field)
+            current_chars += field_chars
+
+        if current_group:
+            field_groups.append(current_group)
+
+        for idx, chunk_fields in enumerate(field_groups, start=1):
+            title = title_base
+            if len(field_groups) > 1:
+                title = f"{title_base} (part {idx}/{len(field_groups)})"
+            embed = {
+                "title": _truncate(title, 256),
+                "color": category_color,
+                "fields": chunk_fields,
+            }
+            embeds.append(embed)
+
+    return embeds
+
+
+def _build_discord_payloads(
+    base_payload: dict,
+    summary_lines: list[str],
+    md_text: str | None,
+    discord_cfg: dict,
+) -> list[dict]:
+    payloads = [{**base_payload, "content": "\n".join(summary_lines)}]
+
+    if not md_text or not discord_cfg.get("send_report_embeds", True):
+        return payloads
+
+    embeds = _build_report_embeds(md_text, discord_cfg)
+    max_embed_messages = max(1, int(discord_cfg.get("max_embed_messages", 3)))
+    embeds_per_message = min(10, max(1, int(discord_cfg.get("max_embeds_per_message", 5))))
+    max_embed_chars_per_message = 5800
+    sent_embed_messages = 0
+    start = 0
+
+    while start < len(embeds):
+        if sent_embed_messages >= max_embed_messages:
+            logger.info(
+                "Discord embeds truncated after %s message(s); remaining embeds omitted from user-facing content",
+                max_embed_messages,
+            )
+            break
+
+        chunk: list[dict] = []
+        chunk_chars = 0
+        while start < len(embeds) and len(chunk) < embeds_per_message:
+            embed = embeds[start]
+            embed_chars = _embed_char_count(embed)
+            if chunk and (chunk_chars + embed_chars > max_embed_chars_per_message):
+                break
+            chunk.append(embed)
+            chunk_chars += embed_chars
+            start += 1
+
+        if not chunk:
+            chunk = [embeds[start]]
+            start += 1
+
+        payloads.append({**base_payload, "embeds": chunk})
+        sent_embed_messages += 1
+
+    return payloads
+
 def send_email_report(
     *,
     run_id: str,
@@ -445,111 +557,6 @@ def send_discord_report(
         state_path,
     )
 
-    def _build_report_embeds(report_md: str) -> list[dict]:
-        _report_title, categories = _parse_report_markdown(report_md)
-        embeds: list[dict] = []
-        default_color = int(discord_cfg.get("embed_color", 0x2B6CB0))
-        max_embed_chars = 5800
-
-        category_colors = {
-            "technology": 0x2563EB,
-            "politics": 0xDC2626,
-            "finance": 0x059669,
-            "science": 0x7C3AED,
-            "culture": 0xEA580C,
-            "aviation": 0x0EA5E9,
-        }
-
-        for category in categories:
-            feeds = [f for f in category.get("feeds", []) if f.get("items")]
-            if not feeds:
-                continue
-
-            fields: list[dict] = []
-            for feed in feeds:
-                fields.append({
-                    "name": _truncate(str(feed.get("name", "Feed")) or "Feed", 256),
-                    "value": _feed_items_to_field_value(feed.get("items", [])),
-                    "inline": False,
-                })
-
-            title_base = str(category.get("name", "Category")) or "Category"
-            category_color = category_colors.get(title_base.strip().lower(), default_color)
-            title_with_part_budget = _truncate(f"{title_base} (part 99/99)", 256)
-            base_embed_char_cost = len(title_with_part_budget)
-
-            field_groups: list[list[dict]] = []
-            current_group: list[dict] = []
-            current_chars = base_embed_char_cost
-
-            for field in fields:
-                field_chars = len(str(field.get("name", ""))) + len(str(field.get("value", "")))
-                would_exceed_chars = current_group and (current_chars + field_chars > max_embed_chars)
-                would_exceed_fields = len(current_group) >= 25
-                if would_exceed_chars or would_exceed_fields:
-                    field_groups.append(current_group)
-                    current_group = []
-                    current_chars = base_embed_char_cost
-                current_group.append(field)
-                current_chars += field_chars
-
-            if current_group:
-                field_groups.append(current_group)
-
-            for idx, chunk_fields in enumerate(field_groups, start=1):
-                title = title_base
-                if len(field_groups) > 1:
-                    title = f"{title_base} (part {idx}/{len(field_groups)})"
-                embed = {
-                    "title": _truncate(title, 256),
-                    "color": category_color,
-                    "fields": chunk_fields,
-                }
-                embeds.append(embed)
-
-        return embeds
-
-    def _build_discord_payloads() -> list[dict]:
-        payloads = [{**base_payload, "content": "\n".join(summary_lines)}]
-
-        if not md_text or not discord_cfg.get("send_report_embeds", True):
-            return payloads
-
-        embeds = _build_report_embeds(md_text)
-        max_embed_messages = max(1, int(discord_cfg.get("max_embed_messages", 3)))
-        embeds_per_message = min(10, max(1, int(discord_cfg.get("max_embeds_per_message", 5))))
-        max_embed_chars_per_message = 5800
-        sent_embed_messages = 0
-        start = 0
-
-        while start < len(embeds):
-            if sent_embed_messages >= max_embed_messages:
-                logger.info(
-                    "Discord embeds truncated after %s message(s); remaining embeds omitted from user-facing content",
-                    max_embed_messages,
-                )
-                break
-
-            chunk: list[dict] = []
-            chunk_chars = 0
-            while start < len(embeds) and len(chunk) < embeds_per_message:
-                embed = embeds[start]
-                embed_chars = _embed_char_count(embed)
-                if chunk and (chunk_chars + embed_chars > max_embed_chars_per_message):
-                    break
-                chunk.append(embed)
-                chunk_chars += embed_chars
-                start += 1
-
-            if not chunk:
-                chunk = [embeds[start]]
-                start += 1
-
-            payloads.append({**base_payload, "embeds": chunk})
-            sent_embed_messages += 1
-
-        return payloads
-
     summary_lines = [
         "TrendAgent Report",
         f"Updated Â· {_run_updated_display()}",
@@ -561,7 +568,7 @@ def send_discord_report(
         base_payload["avatar_url"] = avatar_url
 
     logger.info("Sending Discord webhook message for run %s", run_id)
-    payloads = _build_discord_payloads()
+    payloads = _build_discord_payloads(base_payload, summary_lines, md_text, discord_cfg)
     try:
         if single_mode:
             single_payload = _collapse_payloads_to_single_message(base_payload, payloads, _embed_char_count)
