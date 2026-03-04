@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import json
+import warnings
 from datetime import date, datetime, timedelta
 import traceback
 import re
@@ -19,11 +20,15 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from logging.handlers import RotatingFileHandler
 import feedparser
+
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+warnings.filterwarnings("ignore", category=UserWarning)
 from config.config_loader import CONFIG_PATH as RUNTIME_CONFIG_PATH, ConfigError, load_config
 from config.secrets_loader import SecretConfigError, load_secrets
 from core.delivery import deliver_to_all
 from core.telegram_poll import start_telegram_polling
-from core.voice import VoiceTranscriptionError, transcribe_telegram_media
+from core.voice import VoiceTranscriptionError, preload_fast_voice_model, transcribe_telegram_media
 from memory.identity import canonicalize_url, make_item_id
 from memory.ops_store import load_ops_memory, save_ops_memory_atomic, update_ops_after_run
 from memory.prefs import load_prefs
@@ -2860,6 +2865,7 @@ def run_telegram_mode() -> int:
         return 1
     if TELEGRAM_THREAD is None:
         try:
+            preload_fast_voice_model(logger=logger)
             TELEGRAM_THREAD = start_telegram_polling(token=token, message_handler=handle_telegram_message, logger=logger)
             logger.info("Telegram polling started")
         except Exception:

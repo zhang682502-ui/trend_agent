@@ -1,4 +1,4 @@
-from core.voice import _should_use_short_command_fast_path
+from core.voice import FAST_WHISPER_MODEL_NAME, _should_use_short_command_fast_path
 
 
 def test_short_voice_command_fast_path_enabled_for_three_seconds_or_less():
@@ -9,3 +9,7 @@ def test_short_voice_command_fast_path_enabled_for_three_seconds_or_less():
 def test_short_voice_command_fast_path_disabled_for_longer_or_missing_duration():
     assert _should_use_short_command_fast_path(3.1) is False
     assert _should_use_short_command_fast_path(None) is False
+
+
+def test_fast_voice_model_name_is_tiny_en():
+    assert FAST_WHISPER_MODEL_NAME == "tiny.en"
