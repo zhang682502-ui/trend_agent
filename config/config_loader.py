@@ -7,6 +7,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULT_CONFIG = {
     "telegram_stay_alive": True,
     "telegram_voice_model": "small",
+    "telegram_voice_runtime": None,
     "open_browser": True,
 }
 
@@ -29,3 +30,15 @@ def load_config() -> dict:
     merged = dict(DEFAULT_CONFIG)
     merged.update(data)
     return merged
+
+
+def save_config(data: dict) -> None:
+    if not isinstance(data, dict):
+        raise ConfigError("Config data must be a dictionary.")
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = CONFIG_PATH.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(CONFIG_PATH)
+    except OSError as exc:
+        raise ConfigError(f"Could not write {CONFIG_PATH}: {exc}") from exc

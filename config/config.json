@@ -1,4 +1,91 @@
 {
+  "telegram_stay_alive": true,
+  "telegram_voice_model": "small",
+  "telegram_voice_runtime": {
+    "model_size": "small",
+    "selected": {
+      "model_size": "small",
+      "device": "cpu",
+      "compute_type": "int8",
+      "beam_size": 5,
+      "batch_size": 4,
+      "num_workers": 4,
+      "language": "en",
+      "duration_seconds": 4.1184375,
+      "wall_time_seconds": 29.262157999910414,
+      "realtime_factor": 7.1051601486996985,
+      "selected_at": "2026-03-04T10:50:31+00:00",
+      "source": "benchmark"
+    },
+    "backend": {
+      "detected_at": "2026-03-04T10:48:18+00:00",
+      "ctranslate2_version": "4.7.1",
+      "faster_whisper_version": "1.2.1",
+      "cuda_detected": true,
+      "cuda_device_count": 1,
+      "cuda_usable": false,
+      "cuda_usable_compute_types": [],
+      "torch": {
+        "installed": false
+      }
+    },
+    "benchmark": {
+      "benchmarked_at": "2026-03-04T10:50:31+00:00",
+      "results": [
+        {
+          "started_at": "2026-03-04T10:48:56+00:00",
+          "device": "cpu",
+          "compute_type": "int8",
+          "beam_size": 5,
+          "batch_size": 1,
+          "num_workers": 1,
+          "success": true,
+          "text": "Command status report highlights last help.",
+          "normalized_text": "command status report highlights last help.",
+          "text_length": 43,
+          "language": "en",
+          "duration_seconds": 4.1184375,
+          "wall_time_seconds": 29.286528500029817,
+          "realtime_factor": 7.111077562796527
+        },
+        {
+          "started_at": "2026-03-04T10:49:28+00:00",
+          "device": "cpu",
+          "compute_type": "int8",
+          "beam_size": 5,
+          "batch_size": 4,
+          "num_workers": 4,
+          "success": true,
+          "text": "Command status report highlights last help.",
+          "normalized_text": "command status report highlights last help.",
+          "text_length": 43,
+          "language": "en",
+          "duration_seconds": 4.1184375,
+          "wall_time_seconds": 29.262157999910414,
+          "realtime_factor": 7.1051601486996985,
+          "model_size": "small",
+          "settings_source": "benchmarked"
+        },
+        {
+          "started_at": "2026-03-04T10:50:00+00:00",
+          "device": "cpu",
+          "compute_type": "int8",
+          "beam_size": 1,
+          "batch_size": 4,
+          "num_workers": 4,
+          "success": true,
+          "text": "Command status report highlights last help",
+          "normalized_text": "command status report highlights last help",
+          "text_length": 42,
+          "language": "en",
+          "duration_seconds": 4.1184375,
+          "wall_time_seconds": 28.978036500047892,
+          "realtime_factor": 7.036172456191916
+        }
+      ]
+    }
+  },
+  "open_browser": true,
   "rss_sources": {
     "technology": [
       "https://openai.com/blog/rss.xml",
@@ -193,8 +280,6 @@
   "feed_title_overrides": {
     "https://blog.google/technology/ai/rss/": "Google AI"
   },
-  "telegram_stay_alive": true,
-  "open_browser": true,
   "max_per_feed": 3,
   "max_active_feeds_per_subgroup": 3,
   "agent_memory_path": "memory/run/agent_memory.json",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 import logging
 import shutil
@@ -9,6 +8,7 @@ import time
 import uuid
 
 import requests
+from core.voice_tuner import VoiceTuningError, transcribe_with_saved_or_benchmarked_settings
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -73,18 +73,6 @@ def _convert_to_wav(source_path: Path, wav_path: Path) -> None:
     raise VoiceTranscriptionError(f"ffmpeg conversion failed: {detail}")
 
 
-@lru_cache(maxsize=4)
-def _load_model(model_size: str, device: str, compute_type: str):
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise VoiceTranscriptionError(
-            "faster-whisper is not installed in the active environment. Install requirements.txt into the venv."
-        ) from exc
-
-    return WhisperModel(model_size, device=device, compute_type=compute_type)
-
-
 def _extract_media_payload(message: dict) -> tuple[str, dict]:
     voice_payload = message.get("voice")
     if isinstance(voice_payload, dict):
@@ -100,8 +88,6 @@ def transcribe_telegram_media(
     message: dict,
     logger: logging.Logger | None = None,
     model_size: str = "small",
-    device: str = "auto",
-    compute_type: str = "int8",
     timeout: int = 60,
 ) -> str:
     if not token:
@@ -146,20 +132,31 @@ def transcribe_telegram_media(
         if logger is not None:
             logger.info("TG voice converted wav=%s", wav_path)
 
-        model = _load_model(model_size=model_size, device=device, compute_type=compute_type)
-        segments, info = model.transcribe(str(wav_path), vad_filter=True)
-        parts = [segment.text.strip() for segment in segments if getattr(segment, "text", "").strip()]
-        text = " ".join(parts).strip()
+        runtime_result = transcribe_with_saved_or_benchmarked_settings(
+            sample_wav=str(wav_path),
+            model_size=model_size,
+            logger_override=logger,
+        )
+        text = str(runtime_result.get("text") or "").strip()
         if not text:
             raise VoiceTranscriptionError("No speech detected in the audio.")
 
         if logger is not None:
-            detected_duration = getattr(info, "duration", None)
-            detected_language = getattr(info, "language", None)
+            detected_duration = runtime_result.get("duration_seconds")
+            detected_language = runtime_result.get("language")
             logger.info(
-                "TG voice transcribed kind=%s model=%s language=%s duration=%s elapsed=%.2fs",
+                (
+                    "TG voice transcribed kind=%s model=%s device=%s compute=%s beam=%s "
+                    "batch=%s workers=%s source=%s language=%s duration=%s elapsed=%.2fs"
+                ),
                 media_kind,
                 model_size,
+                runtime_result.get("device"),
+                runtime_result.get("compute_type"),
+                runtime_result.get("beam_size"),
+                runtime_result.get("batch_size"),
+                runtime_result.get("num_workers"),
+                runtime_result.get("settings_source"),
                 detected_language,
                 detected_duration,
                 time.perf_counter() - started_at,
@@ -169,5 +166,7 @@ def transcribe_telegram_media(
         raise VoiceTranscriptionError(f"Telegram download failed: {exc}") from exc
     except subprocess.SubprocessError as exc:
         raise VoiceTranscriptionError(f"Audio conversion failed: {exc}") from exc
+    except VoiceTuningError as exc:
+        raise VoiceTranscriptionError(str(exc)) from exc
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
