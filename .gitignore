@@ -25,3 +25,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+.vscode/tasks.json
+Json/*.json
