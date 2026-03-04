@@ -1,21 +1,320 @@
+﻿import json
+import hashlib
+import os
 from pathlib import Path
-import json
 from datetime import datetime
 import logging
 import re
 import smtplib
 import ssl
-import urllib.error
-import urllib.request
+from urllib.parse import urlparse
 from email.message import EmailMessage
+import requests
 from config.secrets_loader import load_secrets
 
 
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
+JSON_DIR = PROJECT_DIR / "Json"
 MD_REPEAT_TOKEN = "[[PREVIOUSLY_SHOWN]]"
 MD_FRESH_TOKEN = "[[NEW_ITEM]]"
 MD_SUBGROUP_PREFIX = "[[SUBGROUP]] "
 logger = logging.getLogger("trend_agent")
+
+
+def _run_updated_display() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def _run_date_display(run_id: str) -> str:
+    try:
+        dt = datetime.strptime(run_id, "%Y%m%d_%H%M%S")
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
+def _normalize_webhook_url(webhook_url: str) -> str:
+    return webhook_url.split("?", 1)[0].rstrip("/")
+
+
+def _mask_webhook_url(webhook_url: str) -> str:
+    base_webhook_url = _normalize_webhook_url(webhook_url)
+    try:
+        webhook_id, webhook_token = _parse_webhook_parts(base_webhook_url)
+    except ValueError:
+        return base_webhook_url
+    masked_token = webhook_token[:8]
+    return f"https://discord.com/api/webhooks/{webhook_id}/{masked_token}..."
+
+
+def _discord_state_path(webhook_url: str) -> Path:
+    normalized_webhook_url = _normalize_webhook_url(webhook_url)
+    webhook_hash = hashlib.sha256(normalized_webhook_url.encode("utf-8")).hexdigest()[:12]
+    return JSON_DIR / f"discord_single_message_{webhook_hash}.json"
+
+
+def _load_single_message_id(webhook_url: str) -> str | None:
+    state_path = _discord_state_path(webhook_url)
+    if not state_path.exists():
+        return None
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to read Discord single-message state %s: %s", state_path, exc)
+        return None
+    if not isinstance(data, dict):
+        logger.warning("Ignoring malformed Discord single-message state %s", state_path)
+        return None
+    message_id = str(data.get("message_id") or "").strip()
+    return message_id or None
+
+
+def _save_single_message_id(webhook_url: str, message_id: str) -> None:
+    state_path = _discord_state_path(webhook_url)
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = state_path.with_name(f"{state_path.name}.tmp")
+        tmp_path.write_text(
+            json.dumps({"message_id": str(message_id)}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        os.replace(tmp_path, state_path)
+        logger.info("Saved Discord single-message state to %s with message_id=%s", state_path, message_id)
+    except Exception:
+        logger.exception("Failed to persist Discord single-message state to %s", state_path)
+        raise
+
+
+def _parse_webhook_parts(webhook_url: str) -> tuple[str, str]:
+    parsed = urlparse(_normalize_webhook_url(webhook_url))
+    path_parts = [part for part in parsed.path.split("/") if part]
+    try:
+        webhooks_index = path_parts.index("webhooks")
+    except ValueError as exc:
+        raise ValueError("Discord webhook URL looks invalid") from exc
+    if len(path_parts) <= webhooks_index + 2:
+        raise ValueError("Discord webhook URL looks invalid")
+    webhook_id = path_parts[webhooks_index + 1].strip()
+    webhook_token = path_parts[webhooks_index + 2].strip()
+    if not webhook_id or not webhook_token:
+        raise ValueError("Discord webhook URL looks invalid")
+    return webhook_id, webhook_token
+
+
+def _discord_headers() -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "User-Agent": "TrendAgent/0.2 (Discord webhook integration)",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+
+def _raise_discord_http_error(response: requests.Response, *, allow_404: bool = False) -> None:
+    if allow_404 and response.status_code == 404:
+        return
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = response.text
+        if response.status_code == 403 and "1010" in detail:
+            raise RuntimeError(
+                "Discord webhook HTTP 403 (error 1010). This is usually a Discord/Cloudflare access block "
+                "for the request source or client signature. Try rotating the webhook and retrying, or test "
+                "the same webhook with curl/Postman from this machine/network."
+            ) from exc
+        raise RuntimeError(f"Discord webhook HTTP {response.status_code}: {detail}") from exc
+
+
+def _post_webhook(webhook_url: str, payload: dict) -> None:
+    response = requests.post(
+        _normalize_webhook_url(webhook_url),
+        json=payload,
+        headers=_discord_headers(),
+        timeout=30,
+    )
+    _raise_discord_http_error(response)
+
+
+def _post_webhook_wait(webhook_url: str, payload: dict) -> str:
+    base_webhook_url = _normalize_webhook_url(webhook_url)
+    post_url = f"{base_webhook_url}?wait=true"
+    logger.info("Discord single-message POST wait=true -> %s?wait=true", _mask_webhook_url(base_webhook_url))
+    response = requests.post(
+        post_url,
+        json=payload,
+        headers=_discord_headers(),
+        timeout=30,
+    )
+    _raise_discord_http_error(response)
+    logger.info("Discord single-message POST status=%s", response.status_code)
+    try:
+        data = response.json()
+    except ValueError as exc:
+        detail = response.text
+        raise RuntimeError(
+            f"Discord webhook did not return JSON for wait=true response (status {response.status_code}): {detail}"
+        ) from exc
+    message_id = str(data.get("id") or "").strip()
+    if not message_id:
+        raise RuntimeError("Discord webhook wait=true response missing message id")
+    logger.info("Discord single-message POST returned message_id=%s", message_id)
+    return message_id
+
+
+def _patch_webhook_message(webhook_url: str, message_id: str, payload: dict) -> requests.Response:
+    webhook_id, webhook_token = _parse_webhook_parts(_normalize_webhook_url(webhook_url))
+    patch_url = f"https://discord.com/api/webhooks/{webhook_id}/{webhook_token}/messages/{message_id}"
+    logger.info(
+        "Discord single-message PATCH -> https://discord.com/api/webhooks/%s/%s.../messages/%s",
+        webhook_id,
+        webhook_token[:8],
+        message_id,
+    )
+    response = requests.patch(
+        patch_url,
+        json=payload,
+        headers=_discord_headers(),
+        timeout=30,
+    )
+    _raise_discord_http_error(response, allow_404=True)
+    logger.info("Discord single-message PATCH status=%s", response.status_code)
+    return response
+
+
+def _collapse_payloads_to_single_message(base_payload: dict, payloads: list[dict], embed_char_count_fn) -> dict:
+    single_payload = dict(base_payload)
+    content_parts: list[str] = []
+    embeds: list[dict] = []
+    embed_chars = 0
+    embeds_truncated_for_single_message = False
+
+    for payload in payloads:
+        content = str(payload.get("content") or "").strip()
+        if content:
+            content_parts.append(content)
+
+        for embed in payload.get("embeds", []) or []:
+            embed_size = embed_char_count_fn(embed)
+            if len(embeds) >= 10 or embed_chars + embed_size > 5800:
+                embeds_truncated_for_single_message = True
+                continue
+            embeds.append(embed)
+            embed_chars += embed_size
+
+    if embeds_truncated_for_single_message:
+        logger.info(
+            "Discord single-message payload exceeded one-message embed limits; extra embeds omitted from user-facing content"
+        )
+
+    single_payload["content"] = "\n".join(part for part in content_parts if part).strip()
+    if embeds:
+        single_payload["embeds"] = embeds
+    return single_payload
+
+
+def _embed_char_count(embed: dict) -> int:
+    total = 0
+    title = embed.get("title")
+    if isinstance(title, str):
+        total += len(title)
+    description = embed.get("description")
+    if isinstance(description, str):
+        total += len(description)
+    footer = embed.get("footer")
+    if isinstance(footer, dict):
+        footer_text = footer.get("text")
+        if isinstance(footer_text, str):
+            total += len(footer_text)
+    author = embed.get("author")
+    if isinstance(author, dict):
+        author_name = author.get("name")
+        if isinstance(author_name, str):
+            total += len(author_name)
+    for field in embed.get("fields", []) or []:
+        if not isinstance(field, dict):
+            continue
+        name = field.get("name")
+        value = field.get("value")
+        if isinstance(name, str):
+            total += len(name)
+        if isinstance(value, str):
+            total += len(value)
+    return total
+
+
+def _truncate(text: str, limit: int, suffix: str = "...") -> str:
+    if len(text) <= limit:
+        return text
+    if limit <= len(suffix):
+        return suffix[:limit]
+    return text[: limit - len(suffix)] + suffix
+
+
+def _feed_items_to_field_value(items: list[dict]) -> str:
+    lines: list[str] = []
+    for item in items:
+        title = _truncate(str(item.get("title", "(no title)")), 220)
+        url = str(item.get("url", "")).strip()
+        if url:
+            lines.append(f"Ã¢â‚¬Â¢ [{title}]({url})")
+        else:
+            lines.append(f"Ã¢â‚¬Â¢ {title}")
+    text = "\n".join(lines).strip() or "No items"
+    return _truncate(text, 1024, "\n...")
+
+
+def _parse_report_markdown(report_md: str) -> tuple[str | None, list[dict]]:
+    report_title: str | None = None
+    categories: list[dict] = []
+    current_category: dict | None = None
+    current_feed: dict | None = None
+
+    for raw in report_md.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+
+        if line.startswith("# "):
+            report_title = line[2:].strip() or report_title
+            continue
+        if line.startswith("## "):
+            current_category = {"name": line[3:].strip() or "Category", "feeds": []}
+            categories.append(current_category)
+            current_feed = None
+            continue
+        if line.startswith(MD_SUBGROUP_PREFIX):
+            continue
+        if line.startswith("### "):
+            if current_category is None:
+                current_category = {"name": "General", "feeds": []}
+                categories.append(current_category)
+            current_feed = {"name": line[4:].strip() or "Feed", "items": []}
+            current_category["feeds"].append(current_feed)
+            continue
+
+        if line.startswith("- "):
+            if current_category is None:
+                current_category = {"name": "General", "feeds": []}
+                categories.append(current_category)
+            if current_feed is None:
+                current_feed = {"name": "Items", "items": []}
+                current_category["feeds"].append(current_feed)
+
+            item_line = line.replace(MD_REPEAT_TOKEN, "").replace(MD_FRESH_TOKEN, "").strip()
+            m = re.match(r"^- \[(.*?)\]\((.*?)\)$", item_line)
+            if m:
+                current_feed["items"].append({
+                    "title": m.group(1).strip(),
+                    "url": m.group(2).strip(),
+                })
+            else:
+                current_feed["items"].append({
+                    "title": item_line[2:].strip() if item_line.startswith("- ") else item_line,
+                    "url": "",
+                })
+
+    return report_title, categories
 
 def send_email_report(
     *,
@@ -128,6 +427,7 @@ def send_discord_report(
     webhook_url = str(load_secrets().get("discord_webhook_url") or "").strip()
     if not webhook_url:
         raise ValueError("Discord config missing webhook URL")
+    base_webhook_url = _normalize_webhook_url(webhook_url)
 
     if "discord.gg/" in webhook_url:
         raise ValueError(
@@ -136,140 +436,14 @@ def send_discord_report(
         )
     if "/api/webhooks/" not in webhook_url:
         raise ValueError("Discord webhook URL looks invalid")
-
-    def _run_date_display() -> str:
-        try:
-            dt = datetime.strptime(run_id, "%Y%m%d_%H%M%S")
-            return dt.strftime("%Y-%m-%d")
-        except Exception:
-            return datetime.now().strftime("%Y-%m-%d")
-
-    def _post_webhook(payload: dict) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            webhook_url,
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "User-Agent": "TrendAgent/0.2 (Discord webhook integration)",
-                "Accept": "application/json, text/plain, */*",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                status_code = getattr(resp, "status", None) or resp.getcode()
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace")
-            if e.code == 403 and "1010" in detail:
-                raise RuntimeError(
-                    "Discord webhook HTTP 403 (error 1010). This is usually a Discord/Cloudflare access block "
-                    "for the request source or client signature. Try rotating the webhook and retrying, or test "
-                    "the same webhook with curl/Postman from this machine/network."
-                ) from e
-            raise RuntimeError(f"Discord webhook HTTP {e.code}: {detail}") from e
-        if status_code not in (200, 204):
-            raise RuntimeError(f"Unexpected Discord webhook response status: {status_code}")
-
-    def _parse_report_markdown(report_md: str) -> tuple[str | None, list[dict]]:
-        report_title: str | None = None
-        categories: list[dict] = []
-        current_category: dict | None = None
-        current_feed: dict | None = None
-
-        for raw in report_md.splitlines():
-            line = raw.strip()
-            if not line:
-                continue
-
-            if line.startswith("# "):
-                report_title = line[2:].strip() or report_title
-                continue
-            if line.startswith("## "):
-                current_category = {"name": line[3:].strip() or "Category", "feeds": []}
-                categories.append(current_category)
-                current_feed = None
-                continue
-            if line.startswith(MD_SUBGROUP_PREFIX):
-                continue
-            if line.startswith("### "):
-                if current_category is None:
-                    current_category = {"name": "General", "feeds": []}
-                    categories.append(current_category)
-                current_feed = {"name": line[4:].strip() or "Feed", "items": []}
-                current_category["feeds"].append(current_feed)
-                continue
-
-            if line.startswith("- "):
-                if current_category is None:
-                    current_category = {"name": "General", "feeds": []}
-                    categories.append(current_category)
-                if current_feed is None:
-                    current_feed = {"name": "Items", "items": []}
-                    current_category["feeds"].append(current_feed)
-
-                item_line = line.replace(MD_REPEAT_TOKEN, "").replace(MD_FRESH_TOKEN, "").strip()
-                m = re.match(r"^- \[(.*?)\]\((.*?)\)$", item_line)
-                if m:
-                    current_feed["items"].append({
-                        "title": m.group(1).strip(),
-                        "url": m.group(2).strip(),
-                    })
-                else:
-                    current_feed["items"].append({
-                        "title": item_line[2:].strip() if item_line.startswith("- ") else item_line,
-                        "url": "",
-                    })
-
-        return report_title, categories
-
-    def _truncate(text: str, limit: int, suffix: str = "...") -> str:
-        if len(text) <= limit:
-            return text
-        if limit <= len(suffix):
-            return suffix[:limit]
-        return text[: limit - len(suffix)] + suffix
-
-    def _feed_items_to_field_value(items: list[dict]) -> str:
-        lines: list[str] = []
-        for item in items:
-            title = _truncate(str(item.get("title", "(no title)")), 220)
-            url = str(item.get("url", "")).strip()
-            if url:
-                lines.append(f"• [{title}]({url})")
-            else:
-                lines.append(f"• {title}")
-        text = "\n".join(lines).strip() or "No items"
-        return _truncate(text, 1024, "\n...(truncated)")
-
-    def _embed_char_count(embed: dict) -> int:
-        total = 0
-        title = embed.get("title")
-        if isinstance(title, str):
-            total += len(title)
-        description = embed.get("description")
-        if isinstance(description, str):
-            total += len(description)
-        footer = embed.get("footer")
-        if isinstance(footer, dict):
-            footer_text = footer.get("text")
-            if isinstance(footer_text, str):
-                total += len(footer_text)
-        author = embed.get("author")
-        if isinstance(author, dict):
-            author_name = author.get("name")
-            if isinstance(author_name, str):
-                total += len(author_name)
-        for field in embed.get("fields", []) or []:
-            if not isinstance(field, dict):
-                continue
-            name = field.get("name")
-            value = field.get("value")
-            if isinstance(name, str):
-                total += len(name)
-            if isinstance(value, str):
-                total += len(value)
-        return total
+    single_mode = bool(discord_cfg.get("single_message", False))
+    state_path = _discord_state_path(base_webhook_url)
+    logger.info(
+        "Discord delivery starting | webhook=%s | single_mode=%s | state_path=%s",
+        _mask_webhook_url(base_webhook_url),
+        single_mode,
+        state_path,
+    )
 
     def _build_report_embeds(report_md: str) -> list[dict]:
         _report_title, categories = _parse_report_markdown(report_md)
@@ -335,29 +509,25 @@ def send_discord_report(
 
         return embeds
 
-    summary_lines = [f"**TrendAgent Report**  •  {_run_date_display()}"]
+    def _build_discord_payloads() -> list[dict]:
+        payloads = [{**base_payload, "content": "\n".join(summary_lines)}]
 
-    base_payload = {"username": discord_cfg.get("username", "TrendAgent")}
-    avatar_url = discord_cfg.get("avatar_url")
-    if avatar_url:
-        base_payload["avatar_url"] = avatar_url
+        if not md_text or not discord_cfg.get("send_report_embeds", True):
+            return payloads
 
-    logger.info("Sending Discord webhook message for run %s", run_id)
-    _post_webhook({**base_payload, "content": "\n".join(summary_lines)})
-
-    if md_text and discord_cfg.get("send_report_embeds", True):
         embeds = _build_report_embeds(md_text)
         max_embed_messages = max(1, int(discord_cfg.get("max_embed_messages", 3)))
         embeds_per_message = min(10, max(1, int(discord_cfg.get("max_embeds_per_message", 5))))
         max_embed_chars_per_message = 5800
         sent_embed_messages = 0
         start = 0
+
         while start < len(embeds):
             if sent_embed_messages >= max_embed_messages:
-                _post_webhook({
-                    **base_payload,
-                    "content": "TrendAgent report embeds truncated. Increase discord.max_embed_messages to see more.",
-                })
+                logger.info(
+                    "Discord embeds truncated after %s message(s); remaining embeds omitted from user-facing content",
+                    max_embed_messages,
+                )
                 break
 
             chunk: list[dict] = []
@@ -375,8 +545,51 @@ def send_discord_report(
                 chunk = [embeds[start]]
                 start += 1
 
-            _post_webhook({**base_payload, "embeds": chunk})
+            payloads.append({**base_payload, "embeds": chunk})
             sent_embed_messages += 1
+
+        return payloads
+
+    summary_lines = [
+        "TrendAgent Report",
+        f"Updated Â· {_run_updated_display()}",
+    ]
+
+    base_payload = {"username": discord_cfg.get("username", "TrendAgent")}
+    avatar_url = discord_cfg.get("avatar_url")
+    if avatar_url:
+        base_payload["avatar_url"] = avatar_url
+
+    logger.info("Sending Discord webhook message for run %s", run_id)
+    payloads = _build_discord_payloads()
+    try:
+        if single_mode:
+            single_payload = _collapse_payloads_to_single_message(base_payload, payloads, _embed_char_count)
+            saved_message_id = _load_single_message_id(base_webhook_url)
+            logger.info("Discord single-message loaded message_id=%s", saved_message_id or "<none>")
+            if saved_message_id:
+                logger.info("Discord single-message branch=PATCH-existing")
+                patch_response = _patch_webhook_message(base_webhook_url, saved_message_id, single_payload)
+                if patch_response.status_code == 404:
+                    logger.info("Discord single-message branch=fallback-POST-after-404")
+                    new_message_id = _post_webhook_wait(base_webhook_url, single_payload)
+                    logger.info("Discord single-message save step reached with new message_id=%s", new_message_id)
+                    _save_single_message_id(base_webhook_url, new_message_id)
+                else:
+                    logger.info("Discord single-message save step reached with existing message_id=%s", saved_message_id)
+                    _save_single_message_id(base_webhook_url, saved_message_id)
+            else:
+                logger.info("Discord single-message branch=POST-first-time")
+                new_message_id = _post_webhook_wait(base_webhook_url, single_payload)
+                logger.info("Discord single-message save step reached with new message_id=%s", new_message_id)
+                _save_single_message_id(base_webhook_url, new_message_id)
+        else:
+            logger.info("Discord single-message disabled; using existing multi-message POST flow")
+            for payload in payloads:
+                _post_webhook(base_webhook_url, payload)
+    except Exception:
+        logger.exception("Discord delivery failed before completion for run %s", run_id)
+        raise
 
     logger.info("Discord webhook message sent successfully for run %s", run_id)
     return True

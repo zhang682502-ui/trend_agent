@@ -18,7 +18,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from logging.handlers import RotatingFileHandler
 import feedparser
-from config.config_loader import ConfigError, load_config
+from config.config_loader import CONFIG_PATH as RUNTIME_CONFIG_PATH, ConfigError, load_config
 from config.secrets_loader import SecretConfigError, load_secrets
 from core.delivery import deliver_to_all
 from core.telegram_poll import start_telegram_polling
@@ -180,12 +180,22 @@ def _load_runtime_secrets() -> dict | None:
 
 def _load_runtime_config() -> dict | None:
     try:
-        return load_config()
+        config = load_config()
     except ConfigError as exc:
         message = f"Config error: {exc}"
         logger.error(message)
         print(message, file=sys.stderr)
         return None
+    discord_cfg = config.get("discord")
+    discord_single_message = None
+    if isinstance(discord_cfg, dict):
+        discord_single_message = bool(discord_cfg.get("single_message", False))
+    logger.info(
+        "Loaded config from %s | discord.single_message=%s",
+        RUNTIME_CONFIG_PATH.resolve(),
+        discord_single_message,
+    )
+    return config
 
 
 def _acquire_run_file_lock() -> int:

@@ -274,6 +274,7 @@
   },
   "discord": {
     "enabled": true,
+    "single_message": true,
     "username": "TrendAgent",
     "send_report_embeds": true,
     "max_embed_messages": 3,
@@ -281,4 +282,3 @@
     "embed_color": 2844336
   }
 }
-

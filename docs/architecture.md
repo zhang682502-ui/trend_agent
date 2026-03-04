@@ -317,12 +317,17 @@ A private infrastructure for structured awareness.
 
 
 ---
+TrendAgent Architecture
 
-If you want, next we can:
+1. Core
+   - rss_fetcher
+   - processor
+   - reporter
 
-Define the Intelligence Layer boundary (so LLM never contaminates core)
+2. Delivery
+   - email_sender
+   - (future) telegram_sender
 
-Or design Phase 2 cleanly before coding it
-
-
-You’ve moved from coding to system design now.
+3. Config
+   - config.json
+   - rss_list.json

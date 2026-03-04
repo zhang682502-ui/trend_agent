@@ -591,3 +591,81 @@ Focus:
 - Improve Discord behavior without expanding `main.py` complexity again.
 - Treat voice input as an optional input path, not a required dependency.
 - Add LLM capability only behind a clear boundary and fail-open behavior.
+
+## Update (2026-03-02) - Stage 6 Shim Removal + Entry Point Cleanup
+
+### Goal
+Complete the package-structure transition by removing temporary root compatibility shims now that `config/` and `core/` are in place, while keeping `main.py` as the only entry point and preserving runtime behavior.
+
+### What I Did Today
+- Removed the temporary root shim modules after confirming they were pure re-export wrappers:
+  - `config_loader.py`
+  - `secrets_loader.py`
+  - `delivery.py`
+  - `telegram_poll.py`
+- Updated remaining imports to point at the package modules directly:
+  - `from config.config_loader import ...`
+  - `from config.secrets_loader import ...`
+  - `from core.delivery import ...`
+  - `from core.telegram_poll import ...`
+- Updated `main.py` to import from the new package locations instead of the removed root modules.
+- Updated `core/delivery.py` so it loads secrets from `config.secrets_loader` instead of the deleted root shim.
+- Kept `main.py` as the single runtime entry point.
+- Found and fixed an unrelated syntax bug in the secret config error handler in `main.py`:
+  - restored the broken f-string
+  - added matching `logger.error(...)`
+  - added matching `print(..., file=sys.stderr)`
+
+### Files Added or Updated
+- `main.py`
+- `core/delivery.py`
+- `docs/DevLog.md`
+
+### Files Removed
+- `config_loader.py`
+- `secrets_loader.py`
+- `delivery.py`
+- `telegram_poll.py`
+
+### Verification
+- Confirmed there are no remaining root-module imports with:
+  - `rg -n "import (config_loader|secrets_loader|delivery|telegram_poll)|from (config_loader|secrets_loader|delivery|telegram_poll) import" .`
+- `python -m py_compile main.py core\delivery.py core\telegram_poll.py config\config_loader.py config\secrets_loader.py` passed after the `main.py` syntax fix.
+- `python main.py --dev` completed successfully after the fix:
+  - report generation succeeded
+  - HTML report generation succeeded
+  - DEV-mode delivery skips still worked as intended
+  - no root shim modules were required at runtime
+
+### Lessons Learned
+- Compatibility shims are useful for staged refactors, but they should be removed as soon as internal imports are fully migrated or they become permanent ambiguity.
+- Import cleanup is only finished when the import graph is verified directly, not just assumed from file moves.
+- A small syntax error in startup code can mask structural validation work, so compile checks need to stay in the refactor loop.
+
+### Tomorrow Plan (2026-03-03)
+
+1. Continue reducing `main.py` size by extracting clearly bounded responsibilities without changing behavior.
+2. Review docs that still describe the old root-level module layout and update them to match the package structure.
+3. Reassess the next safest extraction point after delivery/config cleanup.
+
+Focus:
+- Keep refactors incremental and behavior-preserving.
+- Prefer import-graph cleanup and boundary tightening before larger feature work.
+- Update docs only where they materially affect maintainability or onboarding.
+
+### Tomorrow Plan (2026-03-03)
+
+1. Create the Discord cleaning channel behavior.
+2. Add Telegram voice-to-text support.
+3. Design and begin LLM integration.
+4: update .py coding structure
+Focus:
+- Keep command parsing deterministic even if it becomes more flexible.
+- Improve Discord behavior without expanding `main.py` complexity again.
+- Treat voice input as an optional input path, not a required dependency.
+- Add LLM capability only behind a clear boundary and fail-open behavior.
+
+## Update (2026-03-03) - Discord entry clean, single message mode.
+-discord entry clean, single message mode. 
+-delivery.py structure refactor, to phase 3. learn to control the pace of refactor
+-creat task to run compile
