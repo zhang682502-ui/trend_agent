@@ -28,3 +28,17 @@ __pycache__/
 
 .vscode/tasks.json
 Json/*.json
+
+# Python virtual environment
+venv/
+.env/
+__pycache__/
+*.pyc
+
+# logs
+logs/
+
+# temp
+*.tmp
+*.wav
+*.ogg

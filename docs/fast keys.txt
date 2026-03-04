@@ -125,3 +125,7 @@ task
 Then press Tab.
 
 It auto-completes.
+
+
+BACKGROUND POWERSHELL OPEN FOR MAIN.PY --telegram
+cd C:\Users\Jewell\trend_agentpip install faster-whisper pydub.\venv\Scripts\python.exe main.py --telegram
