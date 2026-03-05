@@ -45,7 +45,7 @@ from memory.recall_store import (
     commit as recall_commit,
     close as recall_close,
 )
-from tools.local_llm import pick_model, summarize_article
+from tools.local_llm import configure_routing as configure_llm_routing, route_model as route_llm_model, summarize_article
 from tools.local_llm_cache import load_cache as load_llm_summary_cache, save_cache as save_llm_summary_cache
 
 
@@ -2426,10 +2426,20 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
     llm_summary_timeout_s = _env_int("TREND_LLM_TIMEOUT_S", 25, minimum=1)
     llm_summary_bullets = _env_int("TREND_LLM_BULLETS", 4, minimum=1)
     llm_summary_content_chars = _env_int("TREND_LLM_CONTENT_CHARS", 5000, minimum=500)
+    llm_hard_threshold = _env_int("TREND_LLM_HARD_THRESHOLD", 2, minimum=0)
+    llm_reason_model = str(os.getenv("TREND_LLM_REASON_MODEL", "deepseek-r1:7b") or "deepseek-r1:7b").strip() or "deepseek-r1:7b"
+    llm_zh_model = str(os.getenv("TREND_LLM_ZH_MODEL", "qwen2") or "qwen2").strip() or "qwen2"
+    llm_en_model = str(os.getenv("TREND_LLM_EN_MODEL", "llama3") or "llama3").strip() or "llama3"
     llm_summary_cache_path = LLM_SUMMARY_CACHE_PATH
     llm_summary_cache: dict = {}
     llm_summary_cache_dirty = False
     llm_summaries_done = 0
+    configure_llm_routing(
+        hard_threshold=llm_hard_threshold,
+        reason_model=llm_reason_model,
+        zh_model=llm_zh_model,
+        en_model=llm_en_model,
+    )
 
     logger.info("========== Trend Agent RUN START ==========")
     logger.info(f"Run ID: {run_id}")
@@ -2518,15 +2528,23 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
         status["inputs"]["llm_summary_timeout_s"] = llm_summary_timeout_s
         status["inputs"]["llm_summary_bullets"] = llm_summary_bullets
         status["inputs"]["llm_summary_content_chars"] = llm_summary_content_chars
+        status["inputs"]["llm_hard_threshold"] = llm_hard_threshold
+        status["inputs"]["llm_reason_model"] = llm_reason_model
+        status["inputs"]["llm_zh_model"] = llm_zh_model
+        status["inputs"]["llm_en_model"] = llm_en_model
 
         if llm_summary_enabled:
             llm_summary_cache = load_llm_summary_cache(llm_summary_cache_path)
             logger.info(
-                "LLM summary enabled | max_per_run=%s timeout=%ss bullets=%s content_chars=%s cache_entries=%s",
+                "LLM summary enabled | max_per_run=%s timeout=%ss bullets=%s content_chars=%s hard_threshold=%s models(reason=%s zh=%s en=%s) cache_entries=%s",
                 llm_summary_max_per_run,
                 llm_summary_timeout_s,
                 llm_summary_bullets,
                 llm_summary_content_chars,
+                llm_hard_threshold,
+                llm_reason_model,
+                llm_zh_model,
+                llm_en_model,
                 len(llm_summary_cache),
             )
         else:
@@ -2693,8 +2711,10 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
                                 continue
 
                             try:
-                                summary_model = pick_model(
-                                    f"{str(item.get('title', '') or '')}\n{str(item.get('content', '') or '')[:1200]}"
+                                _, _, summary_model = route_llm_model(
+                                    title=str(item.get("title", "") or ""),
+                                    content=str(item.get("content", "") or item.get("title", "") or ""),
+                                    url=str(item.get("canonical_url", "") or item.get("link", "") or ""),
                                 )
                                 summary_text = summarize_article(
                                     title=str(item.get("title", "") or ""),
@@ -2702,6 +2722,7 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
                                     max_bullets=llm_summary_bullets,
                                     timeout_s=llm_summary_timeout_s,
                                     content_chars=llm_summary_content_chars,
+                                    url=str(item.get("canonical_url", "") or item.get("link", "") or ""),
                                 )
                                 item["summary"] = summary_text
                                 if summary_key:
