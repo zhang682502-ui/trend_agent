@@ -44,3 +44,5 @@ logs/
 *.ogg
 *.oga
 data/tmp/
+data/locks/
+*.lock
