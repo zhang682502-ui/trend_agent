@@ -726,3 +726,13 @@ helper 封装细节
 
 
 ---
+Stage 1
+本地 LLM
++ 结构化思考
++ Telegram
+
+Stage 2
+加入云端 LLM Router
+
+Stage 3
+Agent 自动决策

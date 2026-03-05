@@ -32,7 +32,7 @@ from config.secrets_loader import SecretConfigError, load_secrets
 from core.delivery import deliver_to_all
 from core.health import format_health_text, record_command, record_report_trigger, reset_health_state
 from core.runtime_guard import RuntimeAlreadyRunning, acquire_lock
-from core.telegram_poll import TelegramConflictError, run_telegram_forever, start_telegram_polling
+from core.telegram_poll import run_telegram_forever, start_telegram_polling
 from core.voice import VoiceTranscriptionError, preload_fast_voice_model, transcribe_telegram_media
 from memory.identity import canonicalize_url, make_item_id
 from memory.ops_store import load_ops_memory, save_ops_memory_atomic, update_ops_after_run
@@ -2881,14 +2881,8 @@ def run_telegram_mode() -> int:
             run_telegram_forever(token=token, message_handler=handle_telegram_message, logger=logger)
     except KeyboardInterrupt:
         logger.info("Telegram stay-alive interrupted by user; shutting down cleanly")
-    except TelegramConflictError:
-        logger.error("Telegram polling stopped due to getUpdates conflict. Exiting.")
-        return 1
     except RuntimeAlreadyRunning as exc:
         logger.info("Telegram already running (pid=%s). Exiting.", exc.pid)
-    except Exception:
-        logger.exception("Failed to run Telegram polling")
-        return 1
     return 0
 
 

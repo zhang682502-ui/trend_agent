@@ -669,3 +669,8 @@ Focus:
 -discord entry clean, single message mode. 
 -delivery.py structure refactor, to phase 3. learn to control the pace of refactor
 -creat task to run compile
+
+
+2026-03-04
+Telegram voice control working.
+Command "report" triggers TrendAgent successfully.
