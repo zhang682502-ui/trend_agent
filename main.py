@@ -45,6 +45,8 @@ from memory.recall_store import (
     commit as recall_commit,
     close as recall_close,
 )
+from tools.local_llm import pick_model, summarize_article
+from tools.local_llm_cache import load_cache as load_llm_summary_cache, save_cache as save_llm_summary_cache
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,6 +62,7 @@ STATUS_PATH  = JSON_DIR / "status.json"
 HISTORY_PATH = JSON_DIR / "history.json"
 HISTORY_URLS_PATH = JSON_DIR / "history_urls.json"
 FEED_FAILOVER_STATE_PATH = JSON_DIR / "feed_failover_state.json"
+LLM_SUMMARY_CACHE_PATH = DATA_DIR / "llm_summary_cache.json"
 AGENT_MEMORY_PATH = MEMORY_RUN_DIR / "agent_memory.json"
 OPS_MEMORY_PATH = MEMORY_DIR / "ops" / "agent_memory.json"
 PREFS_PATH = MEMORY_DIR / "prefs" / "prefs.yaml"
@@ -232,6 +235,37 @@ def _release_run_file_lock(fd: int | None) -> None:
         logger.exception("Failed to remove run lock file")
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(minimum, int(default))
+    try:
+        return max(minimum, int(raw))
+    except Exception:
+        return max(minimum, int(default))
+
+
+def _short_error_text(exc: Exception, limit: int = 120) -> str:
+    message = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    compact = re.sub(r"\s+", " ", message).strip()
+    return compact[:limit]
+
+
+def _summary_cache_key(item: dict) -> str:
+    for key in ("canonical_url", "normalized_url", "link", "item_id"):
+        raw = item.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return ""
+
+
 def _load_telegram_history() -> list[dict]:
     if not HISTORY_PATH.exists():
         return []
@@ -329,6 +363,10 @@ def _extract_markdown_highlights(path: Path, limit: int = 8) -> list[str]:
             if cleaned:
                 highlights.append(cleaned)
         elif line.startswith("- "):
+            cleaned = _clean_report_line(line)
+            if cleaned:
+                highlights.append(cleaned)
+        elif line.startswith("Title:"):
             cleaned = _clean_report_line(line)
             if cleaned:
                 highlights.append(cleaned)
@@ -1082,6 +1120,38 @@ def normalize_item_title(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip() or "(no title)"
 
 
+def normalize_item_content(text: str, max_chars: int = 1600) -> str:
+    cleaned = re.sub(r"<[^>]+>", " ", str(text or ""))
+    cleaned = html_lib.unescape(cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return ""
+    return cleaned[:max_chars]
+
+
+def extract_entry_content(entry: object) -> str:
+    parts: list[str] = []
+    for attr in ("summary", "description"):
+        raw_val = getattr(entry, attr, "")
+        if isinstance(raw_val, str) and raw_val.strip():
+            parts.append(raw_val)
+    content_val = getattr(entry, "content", None)
+    if isinstance(content_val, list):
+        for block in content_val:
+            if isinstance(block, dict):
+                raw_text = block.get("value")
+                if isinstance(raw_text, str) and raw_text.strip():
+                    parts.append(raw_text)
+                    break
+    if not parts and isinstance(entry, dict):
+        for key in ("summary", "description"):
+            raw_val = entry.get(key)
+            if isinstance(raw_val, str) and raw_val.strip():
+                parts.append(raw_val)
+    merged = " ".join(parts)
+    return normalize_item_content(merged)
+
+
 def _parse_govcn_html_entries(
     html_bytes: bytes,
     *,
@@ -1158,6 +1228,7 @@ def _parse_govcn_html_entries(
             "link": full_url,
             "normalized_url": norm,
             "published_dt": datetime.min,
+            "content": "",
         })
         if len(items) >= max(1, int(fetch_count)):
             break
@@ -1216,6 +1287,7 @@ def _parse_govcn_json_entries(json_bytes: bytes, *, source_url: str, fetch_count
             "link": link,
             "normalized_url": norm,
             "published_dt": published_dt,
+            "content": "",
         })
         if len(items) >= max(1, int(fetch_count)):
             break
@@ -1341,6 +1413,7 @@ def _parse_sitemap_entries(
             "link": loc,
             "normalized_url": norm,
             "published_dt": published_dt or datetime.min,
+            "content": "",
         })
 
     items.sort(key=lambda item: item.get("published_dt") or datetime.min, reverse=True)
@@ -1443,15 +1516,20 @@ def extract_category_urls_from_markdown(md_text: str) -> dict[str, set[str]]:
 
     for raw_line in md_text.splitlines():
         line = raw_line.strip()
+        if not line:
+            continue
         if line.startswith("## "):
             header = line[3:].strip()
             header = re.sub(r"\s+\([^)]*\)\s*$", "", header).strip()
             current_category = normalize_category_key(header)
             category_urls.setdefault(current_category, set())
             continue
-        if not line.startswith("- "):
-            continue
-        for url in link_re.findall(line):
+        urls: list[str] = []
+        if line.lower().startswith("link:"):
+            urls.append(line.split(":", 1)[1].strip())
+        elif line.startswith("- "):
+            urls.extend(link_re.findall(line))
+        for url in urls:
             norm = normalize_url(url)
             if norm:
                 category_urls.setdefault(current_category, set()).add(norm)
@@ -1482,11 +1560,16 @@ def extract_section_urls_from_markdown(md_text: str) -> dict[str, set[str]]:
             section_key = normalize_section_key(current_category, current_feed)
             section_urls.setdefault(section_key, set())
             continue
-        if not line.startswith("- "):
+        urls: list[str] = []
+        if line.lower().startswith("link:"):
+            urls.append(line.split(":", 1)[1].strip())
+        elif line.startswith("- "):
+            cleaned = line.replace(MD_REPEAT_TOKEN, "").replace(MD_FRESH_TOKEN, "").strip()
+            urls.extend(link_re.findall(cleaned))
+        else:
             continue
-        cleaned = line.replace(MD_REPEAT_TOKEN, "").replace(MD_FRESH_TOKEN, "").strip()
         section_key = normalize_section_key(current_category, current_feed)
-        for url in link_re.findall(cleaned):
+        for url in urls:
             norm = normalize_url(url)
             if norm:
                 section_urls.setdefault(section_key, set()).add(norm)
@@ -1851,11 +1934,13 @@ def fetch_rss_entries_detailed(url: str, fetch_count: int = DEFAULT_FETCH_COUNT)
         title = str(getattr(entry, "title", "(no title)") or "(no title)")
         title = normalize_item_title(title)
         link = str(getattr(entry, "link", "") or "").strip()
+        content = extract_entry_content(entry)
         items.append({
             "title": title,
             "link": link,
             "normalized_url": normalize_url(link),
             "published_dt": _entry_published_dt(entry),
+            "content": content,
         })
 
     result["parse_ok"] = True
@@ -1961,11 +2046,23 @@ def feed_items_to_markdown(
     for item in items:
         title = item.get("title", "(no title)")
         link = item.get("link", "")
-        suffix = f" {MD_REPEAT_TOKEN}" if item.get("is_repeat") else f" {MD_FRESH_TOKEN}"
-        if link:
-            md += f"- [{title}]({link}){suffix}\n"
-        else:
-            md += f"- {title}{suffix}\n"
+        source = str(item.get("source", "") or feed_title)
+        content = normalize_item_content(str(item.get("content", "") or ""), max_chars=2000) or "(content unavailable)"
+        summary_text = str(item.get("summary", "") or "").strip()
+        md += f"Title: {title}\n"
+        md += f"Source: {source}\n"
+        md += f"Link: {link or '(no link)'}\n"
+        if summary_text:
+            md += "\nSummary:\n"
+            for raw_line in summary_text.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                line = re.sub(r"^(?:[-*]+|\d+[.)])\s*", "", line).strip()
+                if line:
+                    md += f"- {line}\n"
+        md += "\nContent:\n"
+        md += f"{content}\n\n"
     md += "\n"
     return md
 
@@ -2286,6 +2383,7 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
         "items_duplicates": 0,
         "feeds_ok": 0,
         "feeds_failed": 0,
+        "llm_summaries_generated": 0,
     },
     "dedupe": {
         "lookback_days": HISTORY_DEDUPE_LOOKBACK_DAYS,
@@ -2323,6 +2421,15 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
     recall_enabled = False
     prefs: dict = {}
     feed_failure_rollup: dict[str, dict] = {}
+    llm_summary_enabled = _env_flag("TREND_LLM_SUMMARY", default=False)
+    llm_summary_max_per_run = _env_int("TREND_LLM_MAX_SUMMARIES_PER_RUN", 25, minimum=1)
+    llm_summary_timeout_s = _env_int("TREND_LLM_TIMEOUT_S", 25, minimum=1)
+    llm_summary_bullets = _env_int("TREND_LLM_BULLETS", 4, minimum=1)
+    llm_summary_content_chars = _env_int("TREND_LLM_CONTENT_CHARS", 5000, minimum=500)
+    llm_summary_cache_path = LLM_SUMMARY_CACHE_PATH
+    llm_summary_cache: dict = {}
+    llm_summary_cache_dirty = False
+    llm_summaries_done = 0
 
     logger.info("========== Trend Agent RUN START ==========")
     logger.info(f"Run ID: {run_id}")
@@ -2404,7 +2511,26 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
         status["outputs"]["ops_memory_path"] = str(ops_memory_path)
         status["outputs"]["prefs_path"] = str(PREFS_PATH)
         status["outputs"]["recall_db_path"] = str(RECALL_DB_PATH)
+        status["outputs"]["llm_summary_cache_path"] = str(llm_summary_cache_path)
         status["inputs"]["dedupe_window_days"] = history_window_days
+        status["inputs"]["llm_summary_enabled"] = llm_summary_enabled
+        status["inputs"]["llm_summary_max_per_run"] = llm_summary_max_per_run
+        status["inputs"]["llm_summary_timeout_s"] = llm_summary_timeout_s
+        status["inputs"]["llm_summary_bullets"] = llm_summary_bullets
+        status["inputs"]["llm_summary_content_chars"] = llm_summary_content_chars
+
+        if llm_summary_enabled:
+            llm_summary_cache = load_llm_summary_cache(llm_summary_cache_path)
+            logger.info(
+                "LLM summary enabled | max_per_run=%s timeout=%ss bullets=%s content_chars=%s cache_entries=%s",
+                llm_summary_max_per_run,
+                llm_summary_timeout_s,
+                llm_summary_bullets,
+                llm_summary_content_chars,
+                len(llm_summary_cache),
+            )
+        else:
+            logger.info("LLM summary disabled (set TREND_LLM_SUMMARY=1 to enable)")
 
         logger.info(f"Loaded {len(configured_feeds)} feed definitions, max_per_feed={max_per_feed}")
         status["inputs"]["max_per_feed"] = max_per_feed
@@ -2536,6 +2662,60 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
                             display_count=max_per_feed,
                             freshness_window_days=history_window_days,
                         )
+                        for item in selected_items:
+                            item["source"] = feed_title
+                            if "content" not in item:
+                                item["content"] = ""
+                            if not llm_summary_enabled:
+                                item.pop("summary", None)
+                                continue
+
+                            summary_key = _summary_cache_key(item)
+                            cached_summary = None
+                            if summary_key:
+                                raw_cached = llm_summary_cache.get(summary_key)
+                                if isinstance(raw_cached, dict):
+                                    cache_text = str(raw_cached.get("summary", "") or "").strip()
+                                    if cache_text:
+                                        cached_summary = cache_text
+                                elif isinstance(raw_cached, str) and raw_cached.strip():
+                                    cached_summary = raw_cached.strip()
+                            if cached_summary:
+                                item["summary"] = cached_summary
+                                continue
+
+                            if item.get("is_repeat"):
+                                item["summary"] = "(Summary deferred: existing item not cached)"
+                                continue
+
+                            if llm_summaries_done >= llm_summary_max_per_run:
+                                item["summary"] = "(Summary deferred: max per run reached)"
+                                continue
+
+                            try:
+                                summary_model = pick_model(
+                                    f"{str(item.get('title', '') or '')}\n{str(item.get('content', '') or '')[:1200]}"
+                                )
+                                summary_text = summarize_article(
+                                    title=str(item.get("title", "") or ""),
+                                    content=str(item.get("content", "") or item.get("title", "") or ""),
+                                    max_bullets=llm_summary_bullets,
+                                    timeout_s=llm_summary_timeout_s,
+                                    content_chars=llm_summary_content_chars,
+                                )
+                                item["summary"] = summary_text
+                                if summary_key:
+                                    llm_summary_cache[summary_key] = {
+                                        "summary": summary_text,
+                                        "model": summary_model,
+                                        "timestamp": datetime.now().isoformat(timespec="seconds"),
+                                    }
+                                    llm_summary_cache_dirty = True
+                                llm_summaries_done += 1
+                                status["metrics"]["llm_summaries_generated"] = llm_summaries_done
+                            except Exception as llm_exc:
+                                item["summary"] = f"(Summary unavailable: {_short_error_text(llm_exc)})"
+
                         feed_md = feed_items_to_markdown(
                             feed_title,
                             selected_items,
@@ -2671,6 +2851,18 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
         )
         save_history_urls_store(history_urls_path, history_urls_store)
         save_feed_failover_state(failover_state_path, failover_state)
+        if llm_summary_enabled:
+            try:
+                save_llm_summary_cache(llm_summary_cache_path, llm_summary_cache)
+                logger.info(
+                    "Saved LLM summary cache: %s (entries=%s, generated_this_run=%s, cache_updated=%s)",
+                    llm_summary_cache_path,
+                    len(llm_summary_cache),
+                    llm_summaries_done,
+                    llm_summary_cache_dirty,
+                )
+            except Exception:
+                logger.exception("Failed to save LLM summary cache (non-fatal)")
 
         logger.info(f"Saved report: {output_path}")
         logger.info(f"Saved HTML: {output_html}")

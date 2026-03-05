@@ -1,0 +1,67 @@
+{
+  "https://www.reuters.com/sports/basketball/kawhi-leonard-clippers-overwhelm-struggling-pacers--flm-2026-03-05": {
+    "summary": "- Kawhi Leonard scored 32 points, grabbed 7 rebounds, and had 5 assists as the Los Angeles Clippers overwhelmed the Indiana Pacers 123-97.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T11:48:17"
+  },
+  "https://www.gov.uk/employment-tribunal-decisions/ms-r-graham-and-others-v-kingswood-learning-and-leisure-ltd-in-administration-and-secretary-of-state-for-business-and-trade-2303269-slash-2025-and-others": {
+    "summary": "- The Employment Tribunal found in favour of the claimants, Ms R Graham and others, that they were unfairly dismissed.\n- The tribunal concluded that the claimants' employment was terminated in breach of contract.\n- The decision was made after considering evidence from both parties, including witness statements and documentary evidence.\n- The claimants were awarded compensation and the tribunal ordered the respondents to pay the claimants' costs.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T11:50:29"
+  },
+  "https:///en/press_release_detail.html?id=5734&r=rss": {
+    "summary": "- Total port cargo throughput increased by 1.1% to 44.8 million tonnes comparing Q4 2025 with the same period a year earlier.\n- Comparing Q4 2025 with a year earlier, no further information provided.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T11:53:29"
+  },
+  "https:///en/press_release_detail.html?id=6750&r=rss": {
+    "summary": "- A Hong Kong family's daily life is used as an example to understand GDP (Gross Domestic Product) in a new blog article.\n- The article aims to help readers grasp the concept of GDP in a more relatable and tangible way.\n- The story follows a family's expenses and income to illustrate the concept of GDP.\n- The article provides a fresh perspective on understanding GDP and its relevance to everyday life.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T11:55:14"
+  },
+  "https:///en/press_release_detail.html?id=5733&r=rss": {
+    "summary": "- The value of total retail sales in January 2026 increased by 5.5% over a year earlier.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T11:56:14"
+  },
+  "https://www.gov.uk/employment-tribunal-decisions/mr-b-singh-v-commissioner-of-police-of-the-metropolis-2304577-slash-2024": {
+    "summary": "- The Employment Tribunal found that Mr B Singh was unfairly dismissed by the Metropolitan Police Service.\n- The tribunal ruled that Mr Singh was subjected to harassment and bullying by his colleagues, which contributed to his eventual dismissal.\n- The Commissioner of Police of the Metropolis was held liable for the actions of Mr Singh's colleagues.\n- The tribunal awarded Mr Singh compensation for his unfair dismissal.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T11:58:10"
+  },
+  "https://www.reuters.com/world/africa/somali-parliament-approves-constitution-change-extend-presidents-term-delay-2026-03-05": {
+    "summary": "- The Somali parliament has approved a constitutional change that extends the president's term in office.\n- The move delays the 2022 presidential election to 2026.\n- The change was approved by 252 lawmakers, exceeding the required two-thirds majority.\n- The new term will run from 2026 to 2032.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T11:59:35"
+  },
+  "https://www.reuters.com/sustainability/society-equity/why-women-farmers-are-an-overlooked-force-climate-action--ecmii-2026-03-05": {
+    "summary": "- Despite making up 43% of the agricultural workforce, women farmers often lack access to resources, training, and credit, hindering their ability to adapt to climate change.\n- Women farmers are more likely to prioritize climate-resilient practices, such as crop rotation and agroforestry, which benefit the environment and improve food security.\n- Empowering women farmers can have a multiplier effect, benefiting entire communities and ecosystems.\n- The European Commission's MAMAN (Mainstreaming Agriculture in the Middle East and North Africa) initiative aims to support women farmers in the region, recognizing their critical role in achieving climate goals.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T12:01:56"
+  },
+  "https://www.gov.uk/government/news/aaib-report-atr-42-500-g-lmrc": {
+    "summary": "- Loss of multiple flight deck displays during climb 14 nm north-east of Aberdeen Airport on 27 August 2022\n- The incident involved an ATR 42-500 aircraft with the registration G-LMRC",
+    "model": "llama3",
+    "timestamp": "2026-03-05T12:05:03"
+  },
+  "https://www.gov.uk/government/news/report-022026-fatal-accident-at-ickenham-london-underground-station": {
+    "summary": "- The accident occurred on 28 March 2025 at Ickenham London Underground station.\n- RAIB investigated the incident.\n- The report has been released.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T12:06:10"
+  },
+  "https://www.gov.uk/government/news/baroness-maggie-jones-appointed-new-chair-of-acas": {
+    "summary": "- Baroness Maggie Jones of Whitchurch has been appointed as the new Chair of Acas.\n- The appointment followed a fair and open public appointment process.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T12:07:18"
+  },
+  "https://www.reuters.com/business/finance/ecb-shouldnt-be-too-optimistic-about-early-end-iran-war-rehn-says-2026-03-05": {
+    "summary": "- EU's economic affairs commissioner Olli Rehn says the European Central Bank should not be too optimistic about an early end to the war in Iran.\n- Rehn says the war's impact on the global economy is still uncertain.\n- He warns that the conflict could lead to higher oil prices and inflation.\n- Rehn also says the EU should maintain its sanctions on Iran until the country addresses international concerns about its nuclear program.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T12:12:05"
+  },
+  "https://www.reuters.com/business/toronto-home-sales-fall-10-month-low-trade-war-weighs-2026-03-05": {
+    "summary": "- Toronto home sales fell to a 10-month low in February, with 6,736 transactions recorded.\n- The decline is attributed to the ongoing trade war and rising interest rates.\n- Sales were down 16.4% compared to the same month last year.\n- The average price of a Toronto home was $930,000, a 2.3% increase from February 2022.",
+    "model": "llama3",
+    "timestamp": "2026-03-05T12:13:39"
+  }
+}
