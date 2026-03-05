@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from tools.ollama_cli import run_ollama
@@ -28,21 +29,21 @@ EN_DIFFICULTY_KEYWORDS = (
     "architecture",
 )
 ZH_DIFFICULTY_KEYWORDS = (
-    "为什么",
-    "如何",
-    "分析",
-    "推演",
-    "机制",
-    "因果",
-    "预测",
-    "权衡",
-    "证明",
-    "优化",
-    "政策",
-    "研究",
-    "论文",
-    "技术",
-    "架构",
+    "\u4e3a\u4ec0\u4e48",
+    "\u5982\u4f55",
+    "\u5206\u6790",
+    "\u63a8\u6f14",
+    "\u673a\u5236",
+    "\u56e0\u679c",
+    "\u9884\u6d4b",
+    "\u6743\u8861",
+    "\u8bc1\u660e",
+    "\u4f18\u5316",
+    "\u653f\u7b56",
+    "\u7814\u7a76",
+    "\u8bba\u6587",
+    "\u6280\u672f",
+    "\u67b6\u6784",
 )
 
 HARD_THRESHOLD = 2
@@ -59,7 +60,16 @@ def configure_routing(
     en_model: str = "llama3",
 ) -> None:
     global HARD_THRESHOLD, REASON_MODEL, ZH_MODEL, EN_MODEL
-    HARD_THRESHOLD = max(0, int(hard_threshold))
+
+    try:
+        parsed_threshold = int(hard_threshold)
+    except Exception:
+        parsed_threshold = 2
+    if parsed_threshold < 1:
+        logger.warning("Invalid HARD_THRESHOLD=%s; clamping to 1", parsed_threshold)
+        parsed_threshold = 1
+    HARD_THRESHOLD = parsed_threshold
+
     REASON_MODEL = str(reason_model or "deepseek-r1:7b").strip() or "deepseek-r1:7b"
     ZH_MODEL = str(zh_model or "qwen2").strip() or "qwen2"
     EN_MODEL = str(en_model or "llama3").strip() or "llama3"
@@ -91,9 +101,10 @@ def route_model(title: str, content: str, url: str = "") -> tuple[str, int, str]
     difficulty = score_difficulty(title=title, content=content, url=url)
     if difficulty >= HARD_THRESHOLD:
         return lang, difficulty, REASON_MODEL
-    if lang == "zh":
+    elif lang == "zh":
         return lang, difficulty, ZH_MODEL
-    return lang, difficulty, EN_MODEL
+    else:
+        return lang, difficulty, EN_MODEL
 
 
 def pick_model(text: str) -> str:
@@ -151,6 +162,11 @@ def summarize_article(
     content_chars = max(500, int(content_chars))
     trimmed_content = (content or "").strip()[:content_chars]
     lang, difficulty, model = route_model(title=title, content=trimmed_content, url=url)
+    debug_assert = str(os.getenv("TREND_LLM_DEBUG_ASSERT", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if debug_assert and difficulty < HARD_THRESHOLD and model == REASON_MODEL:
+        raise AssertionError(
+            f"Invalid routing: diff={difficulty} < HARD_THRESHOLD={HARD_THRESHOLD} but model={REASON_MODEL}"
+        )
     logger.info("LLM route: lang=%s diff=%s -> %s", lang, difficulty, model)
     prompt = _build_prompt(title=title or "(no title)", content=trimmed_content, max_bullets=max_bullets)
     raw_text = run_ollama(model=model, prompt=prompt, timeout_s=timeout_s)

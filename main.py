@@ -2427,6 +2427,7 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
     llm_summary_bullets = _env_int("TREND_LLM_BULLETS", 4, minimum=1)
     llm_summary_content_chars = _env_int("TREND_LLM_CONTENT_CHARS", 5000, minimum=500)
     llm_hard_threshold = _env_int("TREND_LLM_HARD_THRESHOLD", 2, minimum=0)
+    llm_hard_threshold = max(1, int(llm_hard_threshold))
     llm_reason_model = str(os.getenv("TREND_LLM_REASON_MODEL", "deepseek-r1:7b") or "deepseek-r1:7b").strip() or "deepseek-r1:7b"
     llm_zh_model = str(os.getenv("TREND_LLM_ZH_MODEL", "qwen2") or "qwen2").strip() or "qwen2"
     llm_en_model = str(os.getenv("TREND_LLM_EN_MODEL", "llama3") or "llama3").strip() or "llama3"
@@ -2439,6 +2440,13 @@ def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
         reason_model=llm_reason_model,
         zh_model=llm_zh_model,
         en_model=llm_en_model,
+    )
+    logger.info(
+        "LLM routing config: HARD_THRESHOLD=%s EN_MODEL=%s ZH_MODEL=%s REASON_MODEL=%s",
+        llm_hard_threshold,
+        llm_en_model,
+        llm_zh_model,
+        llm_reason_model,
     )
 
     logger.info("========== Trend Agent RUN START ==========")
