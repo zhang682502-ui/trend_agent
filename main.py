@@ -29,10 +29,15 @@ os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 warnings.filterwarnings("ignore", category=UserWarning)
 from config.config_loader import CONFIG_PATH as RUNTIME_CONFIG_PATH, ConfigError, load_config
 from config.secrets_loader import SecretConfigError, load_secrets
+from core.llm_controller import (
+    chat_with_context as controller_chat_with_context,
+    decide_and_respond,
+    summarize_report_text as controller_summarize_report_text,
+)
 from core.delivery import deliver_to_all
 from core.health import format_health_text, record_command, record_report_trigger, reset_health_state
 from core.runtime_guard import RuntimeAlreadyRunning, acquire_lock
-from core.telegram_poll import run_telegram_forever, start_telegram_polling
+from core.telegram_poll import run_telegram_forever, send_telegram_text, start_telegram_polling
 from core.voice import VoiceTranscriptionError, preload_fast_voice_model, transcribe_telegram_media
 from memory.identity import canonicalize_url, make_item_id
 from memory.ops_store import load_ops_memory, save_ops_memory_atomic, update_ops_after_run
@@ -45,8 +50,17 @@ from memory.recall_store import (
     commit as recall_commit,
     close as recall_close,
 )
-from tools.local_llm import configure_routing as configure_llm_routing, route_model as route_llm_model, summarize_article
+from tools.context_store import clear_pending_plan, get_context, get_pending_plan, save_context, save_pending_plan
+from tools.local_llm import (
+    configure_routing as configure_llm_routing,
+    detect_language,
+    route_model as route_llm_model,
+    summarize_article,
+)
 from tools.local_llm_cache import load_cache as load_llm_summary_cache, save_cache as save_llm_summary_cache
+from tools.pipeline_runner import run_pipeline_once
+from tools.report_reader import find_latest_report, load_report_text
+from tools.tg_message import strip_redundant_closings
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -181,6 +195,8 @@ def setup_logger() -> logging.Logger:
 logger = setup_logger()
 RUN_TRIGGER_LOCK = threading.Lock()
 TELEGRAM_THREAD = None
+TG_AGENT_REQUEST_LOCK = threading.Lock()
+TG_AGENT_REQUEST_SEQ: dict[int, int] = {}
 
 
 def _load_runtime_secrets() -> dict | None:
@@ -468,6 +484,556 @@ def _telegram_alias_map() -> dict[str, str]:
     }
 
 
+def _local_slash_commands() -> set[str]:
+    return {"status", "help", "report"}
+
+
+def _exact_local_slash_command(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not normalized.startswith("/") or " " in normalized:
+        return ""
+    cmd = normalized[1:].split("@", 1)[0]
+    return cmd if cmd in _local_slash_commands() else ""
+
+
+def parse_telegram_intent(text: str, *, duration_sec: float | None = None, source: str = "text") -> tuple[str, str | None, str]:
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if not normalized:
+        return "chat", None, "empty"
+
+    if normalized.startswith("/"):
+        cmd = _exact_local_slash_command(normalized)
+        if cmd:
+            return "command", f"/{cmd}", "slash"
+        return "chat", None, "slash_nonlocal"
+
+    return "chat", None, "cloud_first"
+
+
+def _natural_language_controller_decision(
+    chat_id: int,
+    text: str,
+    source: str = "text",
+    *,
+    extra_meta: dict | None = None,
+) -> tuple[str, dict | None]:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if not cleaned:
+        return "I need a message to continue.", None
+
+    try:
+        meta_payload = {"source": source}
+        if isinstance(extra_meta, dict):
+            meta_payload.update(extra_meta)
+        reply_text, plan = decide_and_respond(cleaned, chat_id=chat_id, meta=meta_payload)
+        intent = str(plan.get("intent") or "CHAT") if isinstance(plan, dict) else "CHAT"
+        needs_confirmation = bool(plan.get("needs_confirmation")) if isinstance(plan, dict) else False
+        logger.info(
+            "TG natural chat intent=%s needs_confirmation=%s chat_id=%s source=%s",
+            intent,
+            needs_confirmation,
+            chat_id,
+            source,
+        )
+        final_reply = strip_redundant_closings((reply_text or "").strip())
+        if final_reply:
+            return final_reply, plan if isinstance(plan, dict) else None
+        if intent == "RUN_PIPELINE" and needs_confirmation and isinstance(plan, dict):
+            return str(plan.get("confirmation_prompt") or RUN_CONFIRM_EN).strip(), plan
+    except Exception as exc:
+        logger.warning("TG natural chat fallback chat_id=%s source=%s error=%s", chat_id, source, _short_error_text(exc))
+
+    return "I could not complete that request.", None
+
+
+def _natural_language_chat_reply(chat_id: int, text: str, source: str = "text") -> str:
+    reply, _plan = _natural_language_controller_decision(chat_id, text, source=source)
+    return reply
+
+
+def _is_summary_request_text(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not normalized:
+        return False
+    explicit_phrases = (
+        "summarize the latest report",
+        "summarise the latest report",
+        "summary of the latest report",
+        "summarize the latest news",
+        "summarise the latest news",
+        "summary of the latest news",
+        "read the latest report",
+        "read the latest news",
+        "总结最新报告",
+        "总结最新新闻",
+        "通读最新报告",
+        "通读最新新闻",
+    )
+    if any(phrase in normalized for phrase in explicit_phrases):
+        return True
+    summary_tokens = ("summary", "summarize", "summarise", "总结", "通读", "概览")
+    report_tokens = ("report", "news", "latest report", "latest news", "报告", "新闻")
+    return any(token in normalized for token in summary_tokens) and any(token in normalized for token in report_tokens)
+
+
+def _chat_agent_reply(chat_id: int, text: str, source: str = "text") -> str:
+    context = get_context(chat_id) or {}
+    reply = controller_chat_with_context(
+        user_text=text,
+        context=context if isinstance(context, dict) else {},
+        meta={"source": source, "chat_id": chat_id},
+    ).strip()
+    return strip_redundant_closings(reply)
+
+
+def _safe_chat_reply(chat_id: int, text: str, source: str = "voice") -> str:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if not cleaned:
+        return "I could not transcribe that. Please try again."
+
+    try:
+        if _is_summary_request_text(cleaned):
+            summary_plan = {
+                "intent": "FULL_REPORT_SUMMARY",
+                "actions": [
+                    {"tool": "get_latest_report", "args": {}},
+                    {"tool": "summarize_report_full", "args": {"topic_hint": None}},
+                ],
+            }
+            reply = _execute_controller_plan_sync(chat_id, cleaned, summary_plan, source=source).strip()
+        else:
+            reply = _chat_agent_reply(chat_id, cleaned, source=source).strip()
+        if reply:
+            return reply
+    except Exception as exc:
+        logger.warning("TG chat LLM fallback source=%s error=%s", source, _short_error_text(exc))
+    return "I could not complete that reply just now. Please try again."
+
+
+def _start_telegram_report_thread(chat_id: int) -> bool:
+    if RUN_TRIGGER_LOCK.locked():
+        return False
+    record_report_trigger()
+
+    def run_report() -> None:
+        exit_code = -1
+        try:
+            logger.info("TG trigger report start chat_id=%s", chat_id)
+            exit_code = main(start_telegram=False)
+        except Exception:
+            logger.exception("Telegram-triggered report failed")
+        finally:
+            logger.info("TG trigger report finished (exit_code=%s) chat_id=%s", exit_code, chat_id)
+
+    threading.Thread(target=run_report, daemon=True).start()
+    return True
+
+
+def _agent_mode_enabled() -> bool:
+    return _env_flag("TREND_TELEGRAM_AGENT", default=False)
+
+
+def _is_confirmation_text(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not normalized:
+        return False
+    confirmation_tokens = {
+        "yes",
+        "y",
+        "ok",
+        "okay",
+        "sure",
+        "start",
+        "go",
+        "do it",
+        "confirm",
+        "好的",
+        "好",
+        "开始",
+        "可以",
+        "是",
+        "确认",
+    }
+    confirmation_phrases = {
+        "yes please",
+        "go ahead",
+        "please do",
+    }
+    return (
+        normalized in confirmation_tokens
+        or normalized in confirmation_phrases
+        or any(token in normalized for token in ("yes", "开始", "确认", "do it"))
+    )
+
+
+def _is_reject_text(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not normalized:
+        return False
+    reject_tokens = {"no", "n", "cancel", "stop", "later", "不用", "不要", "取消", "先别"}
+    reject_phrases = {
+        "no thanks",
+        "not now",
+    }
+    return (
+        normalized in reject_tokens
+        or normalized in reject_phrases
+        or any(token in normalized for token in ("cancel", "取消", "不用", "先别"))
+    )
+
+
+def _summary_followup_prompt(text: str) -> str:
+    lang = detect_language(text)
+    if lang == "zh":
+        return "想先聊哪一条？你可以说“第1条/第2条”，或直接问你关心的点。"
+    return "Which point should we dig into first? Say '1'/'2' or ask directly."
+
+
+def _safe_send_telegram(
+    token: str,
+    chat_id: int,
+    text: str,
+    *,
+    append_followup_prompt: str | None = None,
+    clean_closings: bool = False,
+) -> None:
+    payload = (text or "").strip()
+    if clean_closings:
+        payload = strip_redundant_closings(payload)
+    if not payload and not append_followup_prompt:
+        return
+    try:
+        if payload:
+            send_telegram_text(token, chat_id, payload, max_chars=2800, logger=logger)
+        prompt = (append_followup_prompt or "").strip()
+        if prompt:
+            send_telegram_text(token, chat_id, prompt, max_chars=2800, logger=logger)
+    except Exception:
+        logger.exception("TG agent send failed chat_id=%s", chat_id)
+
+
+def _next_agent_request_id(chat_id: int) -> int:
+    with TG_AGENT_REQUEST_LOCK:
+        next_id = int(TG_AGENT_REQUEST_SEQ.get(chat_id, 0)) + 1
+        TG_AGENT_REQUEST_SEQ[chat_id] = next_id
+        return next_id
+
+
+def _is_current_agent_request(chat_id: int, request_id: int | None) -> bool:
+    if request_id is None:
+        return True
+    with TG_AGENT_REQUEST_LOCK:
+        return int(TG_AGENT_REQUEST_SEQ.get(chat_id, 0)) == int(request_id)
+
+
+def _summary_to_message(summary: dict) -> str:
+    executive = str(summary.get("executive_summary") or "").strip() or "Summary unavailable."
+    trends = summary.get("trends") if isinstance(summary.get("trends"), list) else []
+    highlights = summary.get("highlights") if isinstance(summary.get("highlights"), list) else []
+    questions = summary.get("questions") if isinstance(summary.get("questions"), list) else []
+
+    lines = ["Summary:", executive]
+    if trends:
+        lines.append("")
+        lines.append("Trends:")
+        lines.extend([f"- {str(item)}" for item in trends[:5]])
+    if highlights:
+        lines.append("")
+        lines.append("Highlights:")
+        lines.extend([f"- {str(item)}" for item in highlights[:5]])
+    if questions:
+        lines.append("")
+        lines.append("Questions:")
+        lines.extend([f"- {str(item)}" for item in questions[:5]])
+    return "\n".join(lines)
+
+
+def _context_payload_from_summary(report_path: Path, report_text: str, summary: dict) -> dict:
+    links = re.findall(r"https?://[^\s)]+", report_text or "")
+    deduped_links: list[str] = []
+    seen: set[str] = set()
+    for link in links:
+        if link in seen:
+            continue
+        seen.add(link)
+        deduped_links.append(link)
+        if len(deduped_links) >= 8:
+            break
+    return {
+        "report_path": str(report_path),
+        "executive_summary": str(summary.get("executive_summary") or "").strip(),
+        "trends": [str(item) for item in (summary.get("trends") or [])[:6]],
+        "highlights": [str(item) for item in (summary.get("highlights") or [])[:6]],
+        "questions": [str(item) for item in (summary.get("questions") or [])[:6]],
+        "links": deduped_links,
+    }
+
+
+def _execute_controller_plan_sync(chat_id: int, user_text: str, plan: dict, *, source: str = "text") -> str:
+    intent = str(plan.get("intent") or "").strip().upper()
+    actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
+
+    if intent == "RUN_PIPELINE":
+        if not _start_telegram_report_thread(chat_id):
+            return "OK, report is already running."
+        return "OK, running report."
+
+    if intent == "FULL_REPORT_SUMMARY" or any(
+        isinstance(action, dict) and str(action.get("tool") or "").strip() in {"get_latest_report", "summarize_report_full"}
+        for action in actions
+    ):
+        report_path = find_latest_report()
+        if report_path is None:
+            return "No report file found."
+        report_text = load_report_text(report_path)
+        topic_hint = None
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            if str(action.get("tool") or "").strip() != "summarize_report_full":
+                continue
+            args = action.get("args") if isinstance(action.get("args"), dict) else {}
+            if isinstance(args.get("topic_hint"), str) and str(args.get("topic_hint")).strip():
+                topic_hint = str(args.get("topic_hint")).strip()
+                break
+        summary = controller_summarize_report_text(report_text, topic_hint=topic_hint)
+        save_context(chat_id, _context_payload_from_summary(report_path, report_text, summary))
+        logger.info("TG context stored for chat_id=%s", chat_id)
+        return _summary_to_message(summary)
+
+    if intent == "CHAT" or any(
+        isinstance(action, dict) and str(action.get("tool") or "").strip() == "chat_with_context"
+        for action in actions
+    ):
+        context = get_context(chat_id) or {}
+        return controller_chat_with_context(
+            user_text=user_text,
+            context=context,
+            meta={"source": source, "chat_id": chat_id},
+        )
+
+    return "I could not execute that request."
+
+
+def _execute_agent_actions(
+    chat_id: int,
+    token: str | None,
+    user_text: str,
+    plan: dict,
+    source: str = "text",
+    request_id: int | None = None,
+) -> None:
+    actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
+    state: dict[str, object] = {}
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        tool = str(action.get("tool") or "").strip()
+        args = action.get("args") if isinstance(action.get("args"), dict) else {}
+        started = time.perf_counter()
+        ok = False
+        outbound: str | None = None
+        clean_closings = False
+        followup_prompt: str | None = None
+        try:
+            if tool == "get_latest_report":
+                report_path = find_latest_report()
+                if report_path is None:
+                    raise RuntimeError("No report file found.")
+                state["report_path"] = report_path
+                state["report_text"] = load_report_text(report_path)
+                ok = True
+            elif tool == "summarize_report_full":
+                report_path = state.get("report_path")
+                report_text = state.get("report_text")
+                if not isinstance(report_path, Path) or not isinstance(report_text, str):
+                    report_path = find_latest_report()
+                    if report_path is None:
+                        raise RuntimeError("No report file available to summarize.")
+                    report_text = load_report_text(report_path)
+                    state["report_path"] = report_path
+                    state["report_text"] = report_text
+                if token and _is_current_agent_request(chat_id, request_id):
+                    _safe_send_telegram(
+                        token,
+                        chat_id,
+                        "Reading the latest report now. I will summarize it after fetching the report content.",
+                    )
+                topic_hint = args.get("topic_hint") if isinstance(args.get("topic_hint"), str) else None
+                summary = controller_summarize_report_text(report_text, topic_hint=topic_hint)
+                outbound = _summary_to_message(summary)
+                clean_closings = True
+                followup_prompt = _summary_followup_prompt(outbound)
+                ok = True
+                if bool(plan.get("store_context")):
+                    save_context(chat_id, _context_payload_from_summary(report_path, report_text, summary))
+                    logger.info("TG context stored for chat_id=%s", chat_id)
+            elif tool == "run_pipeline":
+                if RUN_TRIGGER_LOCK.locked():
+                    outbound = "Pipeline is already running. Please wait for it to finish."
+                else:
+                    with RUN_TRIGGER_LOCK:
+                        run_result = run_pipeline_once(
+                            dev_mode=_env_flag("TREND_TG_RUN_DEV_MODE", default=False),
+                            timeout_s=_env_int("TREND_TG_PIPELINE_TIMEOUT_S", 1800, minimum=60),
+                        )
+                    ok = bool(run_result.get("ok"))
+                    if ok:
+                        report_path = run_result.get("report_path")
+                        outbound = f"Pipeline completed successfully. Latest report: {report_path or 'not found'}"
+                    else:
+                        error_text = str(run_result.get("error") or run_result.get("stderr_tail") or run_result.get("stdout_tail") or "unknown error").strip()
+                        outbound = f"Pipeline failed: {error_text[:500]}"
+            elif tool == "chat_with_context":
+                context = get_context(chat_id) or {}
+                outbound = controller_chat_with_context(
+                    user_text=user_text,
+                    context=context,
+                    meta={"source": source, "chat_id": chat_id},
+                )
+                clean_closings = True
+                ok = bool((outbound or "").strip())
+            else:
+                outbound = f"Unsupported action tool: {tool}"
+        except Exception as exc:
+            outbound = f"{tool} failed: {_short_error_text(exc)}"
+        finally:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            logger.info("TG action tool=%s %s time_ms=%s", tool, "ok" if ok else "fail", elapsed_ms)
+            if token and outbound:
+                if not _is_current_agent_request(chat_id, request_id):
+                    logger.info(
+                        "TG stale action output dropped chat_id=%s request_id=%s tool=%s",
+                        chat_id,
+                        request_id,
+                        tool,
+                    )
+                    continue
+                _safe_send_telegram(
+                    token,
+                    chat_id,
+                    outbound,
+                    append_followup_prompt=followup_prompt,
+                    clean_closings=clean_closings,
+                )
+
+
+def _start_agent_actions_async(
+    chat_id: int,
+    token: str | None,
+    user_text: str,
+    plan: dict,
+    source: str = "text",
+    request_id: int | None = None,
+) -> None:
+    thread = threading.Thread(
+        target=_execute_agent_actions,
+        kwargs={
+            "chat_id": chat_id,
+            "token": token,
+            "user_text": user_text,
+            "plan": plan,
+            "source": source,
+            "request_id": request_id,
+        },
+        daemon=True,
+        name=f"tg-agent-{chat_id}",
+    )
+    thread.start()
+
+
+def _handle_telegram_agent_message(chat_id: int, user_text: str, token: str | None, source: str = "text", meta: dict | None = None) -> str:
+    stripped = re.sub(r"\s+", " ", (user_text or "").strip())
+    if not stripped:
+        return "I could not read that message."
+    request_id = _next_agent_request_id(chat_id)
+
+    if stripped.startswith("/"):
+        return _handle_telegram_text(chat_id, stripped, source=source)
+
+    pending = get_pending_plan(chat_id)
+    if isinstance(pending, dict):
+        if _is_confirmation_text(stripped):
+            pending_plan = pending.get("plan") if isinstance(pending.get("plan"), dict) else {}
+            pending_user_text = str(pending.get("user_text") or stripped)
+            clear_pending_plan(chat_id)
+            _start_agent_actions_async(
+                chat_id,
+                token,
+                pending_user_text,
+                pending_plan,
+                source=source,
+                request_id=request_id,
+            )
+            return "收到，我现在开始执行。"
+        if _is_reject_text(stripped):
+            clear_pending_plan(chat_id)
+            return "好的，已取消当前待执行操作。"
+
+    context = get_context(chat_id)
+    meta_payload = dict(meta or {})
+    if isinstance(context, dict):
+        meta_payload["context"] = context
+    if isinstance(pending, dict):
+        meta_payload["pending_plan"] = pending.get("plan") if isinstance(pending.get("plan"), dict) else {}
+        meta_payload["pending_user_text"] = str(pending.get("user_text") or "")
+
+    try:
+        reply_text, plan = decide_and_respond(stripped, chat_id=chat_id, meta=meta_payload)
+    except Exception as exc:
+        logger.warning("TG controller fallback chat_id=%s error=%s", chat_id, _short_error_text(exc))
+        return _handle_telegram_text(chat_id, stripped, source=source)
+
+    if not isinstance(plan, dict):
+        return _handle_telegram_text(chat_id, stripped, source=source)
+
+    intent = str(plan.get("intent") or "CLARIFY")
+    needs_confirmation = bool(plan.get("needs_confirmation"))
+    if intent == "FULL_REPORT_SUMMARY":
+        needs_confirmation = False
+        plan["needs_confirmation"] = False
+        plan["confirmation_prompt"] = None
+    logger.info("TG controller intent=%s needs_confirmation=%s", intent, needs_confirmation)
+
+    actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
+    if isinstance(pending, dict) and intent == "CHAT" and not needs_confirmation:
+        logger.info("TG pending plan retained chat_id=%s intent=%s", chat_id, intent)
+    elif isinstance(pending, dict):
+        logger.info("TG pending plan superseded chat_id=%s intent=%s", chat_id, intent)
+        clear_pending_plan(chat_id)
+    if needs_confirmation:
+        save_pending_plan(
+            chat_id,
+            {
+                "plan": plan,
+                "user_text": stripped,
+                "source": source,
+            },
+        )
+        confirmation_prompt = str(plan.get("confirmation_prompt") or "").strip()
+        if confirmation_prompt:
+            return confirmation_prompt
+        if reply_text.strip():
+            return reply_text
+        return "Please confirm and I will continue."
+
+    if actions:
+        _start_agent_actions_async(chat_id, token, stripped, plan, source=source, request_id=request_id)
+
+    if intent == "CHAT" and actions and all(
+        isinstance(action, dict) and str(action.get("tool") or "").strip() == "chat_with_context"
+        for action in actions
+    ):
+        return ""
+
+    final_reply = strip_redundant_closings((reply_text or "").strip())
+    if final_reply:
+        return final_reply
+    if actions:
+        return "Understood. I started working on it."
+    return "I am ready. Tell me what you want to do next."
+
+
 def _telegram_command_name(text: str) -> str:
     normalized = (text or "").strip().lower()
     if normalized.startswith("/"):
@@ -509,39 +1075,42 @@ def parse_voice_command(transcript: str, duration_sec: float | None) -> str | No
 
     normalized = stripped.lower()
     if normalized.startswith("/"):
-        command_name = _telegram_command_name(stripped)
+        command_name = _exact_local_slash_command(stripped)
         return f"/{command_name}" if command_name else None
     if normalized.startswith("cmd:"):
-        command_name = _telegram_command_name(_telegram_command_text_from_transcription(stripped))
+        command_name = _exact_local_slash_command(_telegram_command_text_from_transcription(stripped))
         return f"/{command_name}" if command_name else None
-
-    tokens = _voice_command_tokens(stripped)
-    if not tokens:
-        return None
-
-    if tokens[0] in {"slash", "cmd"}:
-        fallback_text = "/" + " ".join(tokens[1:])
-        command_name = _telegram_command_name(fallback_text)
-        return f"/{command_name}" if command_name else None
-
-    if len(tokens) > 3:
-        return None
-    if duration_sec is not None and duration_sec > 3:
-        return None
-
-    canonical_tokens = [_telegram_alias_map().get(token, "") for token in tokens]
-    if not canonical_tokens or not canonical_tokens[0]:
-        return None
-    if any(not token for token in canonical_tokens):
-        return None
-    if len(set(canonical_tokens)) != 1:
-        return None
-    return f"/{canonical_tokens[0]}"
+    return None
 
 
 def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
     logger.info("TG recv chat_id=%s source=%s text=%r", chat_id, source, text)
-    cmd = _telegram_command_name(text)
+    pending = get_pending_plan(chat_id)
+    normalized_text = re.sub(r"\s+", " ", (text or "").strip())
+    pending_plan = pending.get("plan") if isinstance(pending, dict) and isinstance(pending.get("plan"), dict) else {}
+    pending_intent = str(pending_plan.get("intent") or "").strip().upper() if isinstance(pending_plan, dict) else ""
+    if isinstance(pending, dict):
+        if _is_confirmation_text(normalized_text):
+            clear_pending_plan(chat_id)
+            if pending_intent == "RUN_PIPELINE":
+                if not _start_telegram_report_thread(chat_id):
+                    return "OK, report is already running."
+                return "OK, running report."
+            return "OK, continuing."
+        if _is_reject_text(normalized_text):
+            clear_pending_plan(chat_id)
+            return "OK, cancelled."
+
+    intent_kind, intent_command, intent_reason = parse_telegram_intent(text, source=source)
+    cmd = _telegram_command_name(intent_command) if intent_kind == "command" and intent_command else ""
+    logger.info(
+        "TG intent parsed chat_id=%s source=%s kind=%s reason=%s command=%r",
+        chat_id,
+        source,
+        intent_kind,
+        intent_reason,
+        intent_command,
+    )
 
     if cmd:
         logger.info("TG cmd=%s chat_id=%s source=%s", cmd, chat_id, source)
@@ -554,22 +1123,9 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
         return "TrendAgent alive ?"
 
     if cmd == "report":
-        if RUN_TRIGGER_LOCK.locked():
-            return "Report already running ?"
-        record_report_trigger()
-
-        def run_report() -> None:
-            exit_code = -1
-            try:
-                logger.info("TG trigger report start chat_id=%s", chat_id)
-                exit_code = main(start_telegram=False)
-            except Exception:
-                logger.exception("Telegram-triggered report failed")
-            finally:
-                logger.info("TG trigger report finished (exit_code=%s) chat_id=%s", exit_code, chat_id)
-
-        threading.Thread(target=run_report, daemon=True).start()
-        return "Report triggered ?"
+        if not _start_telegram_report_thread(chat_id):
+            return "OK, report is already running."
+        return "OK, running report."
 
     if cmd == "help":
         return (
@@ -611,6 +1167,23 @@ def _handle_telegram_text(chat_id: int, text: str, source: str = "text") -> str:
     if cmd == "health":
         return format_health_text()
 
+    if intent_kind == "chat":
+        if _is_summary_request_text(normalized_text):
+            if isinstance(pending, dict):
+                logger.info("TG pending plan superseded chat_id=%s source=%s text=%r", chat_id, source, normalized_text)
+                clear_pending_plan(chat_id)
+            summary_plan = {
+                "intent": "FULL_REPORT_SUMMARY",
+                "actions": [
+                    {"tool": "get_latest_report", "args": {}},
+                    {"tool": "summarize_report_full", "args": {"topic_hint": None}},
+                ],
+            }
+            return _execute_controller_plan_sync(chat_id, normalized_text, summary_plan, source=source)
+        if isinstance(pending, dict):
+            logger.info("TG pending plan retained chat_id=%s source=%s text=%r", chat_id, source, normalized_text)
+        return _chat_agent_reply(chat_id, normalized_text, source=source)
+
     return "I didn't understand. Try: ping, status, report/run, hl/highlights, last, help, or send a voice note."
 
 
@@ -625,25 +1198,43 @@ def _handle_telegram_voice_message(chat_id: int, message: dict, token: str) -> s
         except (TypeError, ValueError):
             duration_sec = None
     transcription = transcribe_telegram_media(token=token, message=message, logger=logger, model_size=model_name)
-    logger.info("TG voice text chat_id=%s text=%r", chat_id, transcription)
-    parsed_command = parse_voice_command(transcription, duration_sec=duration_sec)
-    executed = bool(parsed_command)
+    logger.info("TG flow transcribed chat_id=%s text=%r", chat_id, transcription)
+    if _agent_mode_enabled():
+        return _handle_telegram_agent_message(
+            chat_id,
+            transcription,
+            token=token,
+            source="voice",
+            meta={"duration_sec": duration_sec, "source": "voice"},
+        )
+
+    intent_kind, parsed_command, intent_reason = parse_telegram_intent(
+        transcription,
+        duration_sec=duration_sec,
+        source="voice",
+    )
+    executed = intent_kind == "command" and bool(parsed_command)
     logger.info(
-        "TG voice command_parse chat_id=%s duration=%s transcript=%r parsed_command=%r executed=%s",
+        "TG flow intent_parsed chat_id=%s source=voice duration=%s kind=%s reason=%s parsed_command=%r executed=%s",
         chat_id,
         duration_sec,
-        transcription,
+        intent_kind,
+        intent_reason,
         parsed_command,
         executed,
     )
 
-    if not parsed_command:
-        return f"Transcription: {transcription}"
+    if not executed or not parsed_command:
+        logger.info("TG flow action_dispatch chat_id=%s skipped=True reason=%s", chat_id, intent_reason)
+        reply = _safe_chat_reply(chat_id, transcription, source="voice")
+        logger.info("TG flow response_ready chat_id=%s source=voice kind=chat", chat_id)
+        return reply
 
     execute_started_at = time.perf_counter()
+    logger.info("TG flow action_dispatch chat_id=%s command=%r", chat_id, parsed_command)
     reply = _handle_telegram_text(chat_id, parsed_command, source="voice")
     logger.info(
-        "TG voice execute chat_id=%s command=%r elapsed=%.2fs",
+        "TG flow response_ready chat_id=%s source=voice kind=command command=%r elapsed=%.2fs",
         chat_id,
         parsed_command,
         time.perf_counter() - execute_started_at,
@@ -665,6 +1256,14 @@ def handle_telegram_message(chat_id: int, text: str, message: dict | None = None
         except Exception:
             logger.exception("TG voice transcription unexpected failure chat_id=%s", chat_id)
             return "Voice transcription failed due to an unexpected error."
+    if _agent_mode_enabled():
+        return _handle_telegram_agent_message(
+            chat_id,
+            text,
+            token=token,
+            source="text",
+            meta={"source": "text"},
+        )
     return _handle_telegram_text(chat_id, text, source="text")
 
 

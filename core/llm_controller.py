@@ -66,6 +66,13 @@ def detect_language(text: str) -> str:
     return "zh" if cjk_count >= 20 else "en"
 
 
+def _chat_language(text: str) -> str:
+    forced = _env_str("TREND_LLM_FORCE_LANG").lower()
+    if forced in {"zh", "en"}:
+        return forced
+    return "zh" if CJK_RE.search(text or "") else "en"
+
+
 def _llm_provider() -> str:
     provider = _env_str("TREND_LLM_PROVIDER", "ollama").lower()
     if provider in {"openai", "chatgpt"}:
@@ -76,13 +83,13 @@ def _llm_provider() -> str:
 
 
 def _pick_chat_model(text: str) -> str:
-    if detect_language(text) == "zh":
+    if _chat_language(text) == "zh":
         return str(os.getenv("TREND_LLM_ZH_MODEL", "qwen2") or "qwen2").strip() or "qwen2"
     return str(os.getenv("TREND_LLM_EN_MODEL", "llama3") or "llama3").strip() or "llama3"
 
 
 def _pick_openai_model(text: str, *, kind: str) -> str:
-    lang = detect_language(text)
+    lang = _chat_language(text)
     base = _env_str("TREND_OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
     if kind == "controller":
         specific = _env_str("TREND_OPENAI_CONTROLLER_MODEL")
@@ -545,13 +552,19 @@ def _informational_chat_reply(text: str, *, lang: str) -> str | None:
     hints = _request_hints(text)
     if hints["status_like"]:
         if lang == "zh":
-            return "我在线。精确本地状态请用 /status。你也可以让我总结最新报告或发起新的报告流程。"
+            return "???????????? /status???????????????????????"
         return "I am available. Use /status for the exact local status. You can also ask me to summarize the latest report or start a new report run."
     if hints["help_like"]:
         if lang == "zh":
-            return "我可以读取并总结最新报告、解释要点、或发起新的报告流程。精确本地命令有 /status、/help、/report。"
-        return "I can summarize the latest report, explain key points, or start a new report run. Exact local commands are /status, /help, and /report."
+            return "?????????????????????????????????? /status?/help?/report?"
+        return "I can summarize the latest report, explain key points, or just chat normally. Exact local commands are /status, /help, and /report."
     return None
+
+
+def _chat_timeout_fallback(*, lang: str) -> str:
+    if lang == "zh":
+        return "?????????????????????????????????"
+    return "The local model timed out this time. You can try again, or ask for a shorter reply."
 
 
 def _reply_from_plan(plan: dict[str, Any], *, lang: str) -> str:
@@ -559,11 +572,10 @@ def _reply_from_plan(plan: dict[str, Any], *, lang: str) -> str:
     if intent == "RUN_PIPELINE":
         return str(plan.get("confirmation_prompt") or (RUN_CONFIRM_ZH if lang == "zh" else RUN_CONFIRM_EN)).strip()
     if intent == "FULL_REPORT_SUMMARY":
-        return "我会读取最新报告并给你完整总结。" if lang == "zh" else "I will read the latest report and send a full summary."
+        return "????????????????" if lang == "zh" else "I will read the latest report and send a full summary."
     if intent == "CLARIFY":
         return str(plan.get("confirmation_prompt") or (AMBIGUOUS_CONFIRM_ZH if lang == "zh" else AMBIGUOUS_CONFIRM_EN)).strip()
-    return "我会继续结合当前上下文处理。" if lang == "zh" else "I will continue with the current context."
-
+    return "??????" if lang == "zh" else "What would you like to talk about?"
 
 def _fallback_controller(text: str, *, chat_id: int, meta: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
     lang = detect_language(text)
@@ -681,14 +693,21 @@ def chat_with_context(user_text: str, context: dict[str, Any] | None = None, met
     text = (user_text or "").strip()
     if not text:
         return "Please send a message."
-    lang = detect_language(text)
+    lang = _chat_language(text)
     timeout_s = _env_int("TREND_LLM_CHAT_TIMEOUT_S", 120, minimum=3)
     context = context if isinstance(context, dict) else {}
     context_snippet = json.dumps(context, ensure_ascii=False)[:1600] if context else "{}"
+    provider = _llm_provider()
+    model = _pick_openai_model(text, kind="chat") if provider == "openai" else _pick_chat_model(text)
+    logger.info("TG chat model=%s timeout_s=%s", model, timeout_s)
     prompt = (
-        "You are a concise assistant discussing a trend report context.\n"
-        "Reply naturally and keep to 3-8 sentences.\n"
-        "If context is empty, answer generally and ask whether to generate a full summary first.\n\n"
+        "You are the TrendAgent chat interface.\n"
+        "Reply in the same language as the user.\n"
+        "Be concise, natural, and conversational.\n"
+        "Do not use canned closings or awkward control phrases.\n"
+        "Do not invent missing report details.\n"
+        "If the user refers to the latest report but no report context is available, say that clearly and naturally.\n"
+        "If the user is just chatting, answer directly.\n\n"
         f"Context:\n{context_snippet}\n\n"
         f"User:\n{text}\n"
     )
@@ -698,35 +717,6 @@ def chat_with_context(user_text: str, context: dict[str, Any] | None = None, met
             return reply
     except Exception as exc:
         logger.warning("TG context chat fallback error=%s", exc)
+        return _chat_timeout_fallback(lang=lang)
 
-    executive_summary = str(context.get("executive_summary") or "").strip()
-    point_items: list[str] = []
-    for key in ("trends", "highlights", "questions"):
-        value = context.get(key)
-        if not isinstance(value, list):
-            continue
-        for item in value:
-            text_item = str(item).strip()
-            if text_item:
-                point_items.append(text_item)
-            if len(point_items) >= 3:
-                break
-        if len(point_items) >= 3:
-            break
-    if executive_summary or point_items:
-        lines: list[str] = []
-        if executive_summary:
-            lines.append(executive_summary)
-        if point_items:
-            if lines:
-                lines.append("")
-            lines.append("Top points:")
-            for idx, item in enumerate(point_items[:3], start=1):
-                lines.append(f"{idx}. {item}")
-        payload = "\n".join(lines).strip()
-        if payload:
-            return payload
-
-    if lang == "zh":
-        return "我先按通用理解回答。如果你希望更准确，我可以先读取并总结最新报告。"
-    return "I can answer generally, or I can first read and summarize the latest report for a more accurate discussion."
+    return _chat_timeout_fallback(lang=lang)
