@@ -73,15 +73,6 @@ def _chat_language(text: str) -> str:
     return "zh" if CJK_RE.search(text or "") else "en"
 
 
-def _llm_provider() -> str:
-    provider = _env_str("TREND_LLM_PROVIDER", "ollama").lower()
-    if provider in {"openai", "chatgpt"}:
-        return "openai"
-    if provider in {"local", "ollama"}:
-        return "ollama"
-    return "ollama"
-
-
 def _controller_provider_name() -> str:
     provider = _env_str("TREND_CONTROLLER_PROVIDER", "openai").lower()
     if provider in {"openai", "chatgpt"}:
@@ -731,7 +722,6 @@ def chat_with_context(user_text: str, context: dict[str, Any] | None = None, met
     timeout_s = _env_int("TREND_LLM_CHAT_TIMEOUT_S", 120, minimum=3)
     context = context if isinstance(context, dict) else {}
     context_snippet = json.dumps(context, ensure_ascii=False)[:1600] if context else "{}"
-    provider = _llm_provider()
     provider = _chat_provider_name()
     model = _pick_openai_model(text, kind="chat") if provider == "openai" else _pick_chat_model(text)
     logger.info("TG chat provider=%s model=%s timeout_s=%s", provider, model, timeout_s)

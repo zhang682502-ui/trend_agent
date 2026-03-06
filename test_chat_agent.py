@@ -28,7 +28,6 @@ def fake_run_openai_chat(*, model: str, messages: list[dict[str, str]], timeout_
 
 
 def main_smoke() -> None:
-    os.environ["TREND_CONTROLLER_PROVIDER"] = "openai"
     os.environ["TREND_CHAT_PROVIDER"] = "openai"
     os.environ["TREND_SUMMARY_PROVIDER"] = "openai"
     controller._run_openai_chat = fake_run_openai_chat  # type: ignore[assignment]
