@@ -82,6 +82,22 @@ def _llm_provider() -> str:
     return "ollama"
 
 
+def _chat_provider_name() -> str:
+    provider = _env_str("TREND_CHAT_PROVIDER", "openai").lower()
+    if provider in {"openai", "chatgpt"}:
+        return "openai"
+    if provider in {"ollama", "local"}:
+        return "ollama"
+    return "openai"
+
+
+def _local_provider_name() -> str:
+    provider = _env_str("TREND_LOCAL_PROVIDER", "ollama").lower()
+    if provider in {"ollama", "local"}:
+        return "ollama"
+    return "ollama"
+
+
 def _pick_chat_model(text: str) -> str:
     if _chat_language(text) == "zh":
         return str(os.getenv("TREND_LLM_ZH_MODEL", "qwen2") or "qwen2").strip() or "qwen2"
@@ -179,10 +195,10 @@ def _run_controller_llm(prompt: str, *, text: str, timeout_s: int) -> str:
 
 
 def _run_context_chat_llm(prompt: str, *, text: str, timeout_s: int) -> str:
-    provider = _llm_provider()
+    provider = _chat_provider_name()
     if provider == "openai":
         model = _pick_openai_model(text, kind="chat")
-        logger.info("TG context provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+        logger.info("TG chat provider=%s model=%s timeout_s=%s", provider, model, timeout_s)
         return _run_openai_chat(
             model=model,
             messages=[
@@ -192,26 +208,15 @@ def _run_context_chat_llm(prompt: str, *, text: str, timeout_s: int) -> str:
             timeout_s=timeout_s,
         )
     model = _pick_chat_model(text)
-    logger.info("TG context provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+    logger.info("TG chat provider=%s model=%s timeout_s=%s", provider, model, timeout_s)
     return get_provider("ollama", model).chat(prompt, timeout_s=timeout_s)
 
 
 def _run_summary_llm(prompt: str, *, text: str, timeout_s: int) -> str:
-    provider = _llm_provider()
-    if provider == "openai":
-        model = _pick_openai_model(text, kind="summary")
-        logger.info("TG summary provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
-        return _run_openai_chat(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You summarize report content. Return valid JSON only."},
-                {"role": "user", "content": prompt},
-            ],
-            timeout_s=timeout_s,
-        )
+    provider = _local_provider_name()
     model = _pick_chat_model(text)
     logger.info("TG summary provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
-    return get_provider("ollama", model).summarize(prompt, timeout_s=timeout_s)
+    return get_provider(provider, model).summarize(prompt, timeout_s=timeout_s)
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -698,8 +703,9 @@ def chat_with_context(user_text: str, context: dict[str, Any] | None = None, met
     context = context if isinstance(context, dict) else {}
     context_snippet = json.dumps(context, ensure_ascii=False)[:1600] if context else "{}"
     provider = _llm_provider()
+    provider = _chat_provider_name()
     model = _pick_openai_model(text, kind="chat") if provider == "openai" else _pick_chat_model(text)
-    logger.info("TG chat model=%s timeout_s=%s", model, timeout_s)
+    logger.info("TG chat provider=%s model=%s timeout_s=%s", provider, model, timeout_s)
     prompt = (
         "You are the TrendAgent chat interface.\n"
         "Reply in the same language as the user.\n"
