@@ -39,7 +39,7 @@ from core.llm_controller import (
 from core.delivery import deliver_to_all
 from core.health import format_health_text, record_command, record_report_trigger, reset_health_state
 from core.runtime_guard import RuntimeAlreadyRunning, acquire_lock
-from core.telegram_poll import run_telegram_forever, send_telegram_text, start_telegram_polling
+from core.telegram_poll import run_telegram_forever, send_telegram_message, start_telegram_polling
 from core.voice import VoiceTranscriptionError, preload_fast_voice_model, transcribe_telegram_media
 from memory.identity import canonicalize_url, make_item_id
 from memory.ops_store import load_ops_memory, save_ops_memory_atomic, update_ops_after_run
@@ -719,10 +719,10 @@ def _safe_send_telegram(
         return
     try:
         if payload:
-            send_telegram_text(token, chat_id, payload, max_chars=2800, logger=logger)
+            send_telegram_message(token, chat_id, payload, max_chars=2800, logger=logger)
         prompt = (append_followup_prompt or "").strip()
         if prompt:
-            send_telegram_text(token, chat_id, prompt, max_chars=2800, logger=logger)
+            send_telegram_message(token, chat_id, prompt, max_chars=2800, logger=logger)
     except Exception:
         logger.exception("TG agent send failed chat_id=%s", chat_id)
 

@@ -1,0 +1,76 @@
+{
+  "1": {
+    "report_path": "C:\\Users\\Jewell\\trend_agent\\report\\trend_report_20260306_101001.md",
+    "executive_summary": "Cloud summary smoke.",
+    "trends": [
+      "A",
+      "B"
+    ],
+    "highlights": [
+      "H1"
+    ],
+    "questions": [],
+    "links": [
+      "https://openai.com/index/gpt-5-4-thinking-system-card",
+      "https://openai.com/index/introducing-gpt-5-4",
+      "https://openai.com/index/reasoning-models-chain-of-thought-controllability",
+      "https://blog.google/company-news/inside-google/googlers/how-google-ai-visual-search-works/",
+      "https://blog.google/innovation-and-ai/products/google-ai-updates-february-2026/",
+      "https://blog.google/products-and-platforms/products/search/ai-mode-canvas-writing-coding/",
+      "https://www.whitehouse.gov/articles/2026/03/americas-unstoppable-momentum-in-operation-epic-fury/",
+      "https://www.whitehouse.gov/briefings-statements/2026/03/america-250-presidential-message-on-the-anniversary-of-the-boston-massacre/"
+    ],
+    "updated_at": 1772787954
+  },
+  "8740133206": {
+    "report_path": "C:\\Users\\Jewell\\trend_agent\\report\\trend_report_20260306_174456.md",
+    "executive_summary": "本报告涵盖了近期在技术、政治和金融领域的重要动态。OpenAI推出了GPT-5.4，强调其在投资分析中的应用，同时Google AI更新了其视觉搜索功能。政治方面，美国白宫和英国政府在处理国内外事务上面临挑战，尤其是在电力成本和医疗设备监管方面。整体来看，技术进步与政策应对之间的互动日益显著。",
+    "trends": [
+      "AI技术在投资分析中的应用日益普及。",
+      "视觉搜索技术的进步提升了用户体验。",
+      "国际政治局势对国内政策的影响加剧。",
+      "医疗设备的监管和召回措施引发关注。",
+      "对关键矿产资源的需求增加，带来发展机遇与风险。"
+    ],
+    "highlights": [
+      "Balyasny资产管理公司利用GPT-5.4构建AI研究系统。",
+      "OpenAI推出CoT-Control以增强AI安全性。",
+      "英国政府召回一批药品以防潜在制造错误。",
+      "国际妇女节庆祝活动强调女性在执法中的领导地位。",
+      "欧盟暂停格鲁吉亚外交护照持有者的免签旅行。"
+    ],
+    "questions": [
+      "如何确保AI技术在投资中的安全性和有效性？",
+      "视觉搜索技术的未来发展方向是什么？",
+      "国际局势如何影响各国的能源政策？",
+      "医疗设备的监管措施是否足够有效？",
+      "关键矿产资源的开发如何平衡经济利益与环境保护？"
+    ],
+    "links": [
+      "https://openai.com/index/balyasny-asset-management",
+      "https://openai.com/index/reasoning-models-chain-of-thought-controllability",
+      "https://openai.com/index/introducing-gpt-5-4",
+      "https://blog.google/company-news/inside-google/googlers/how-google-ai-visual-search-works/",
+      "https://blog.google/innovation-and-ai/products/google-ai-updates-february-2026/",
+      "https://blog.google/products-and-platforms/products/search/ai-mode-canvas-writing-coding/",
+      "https://www.whitehouse.gov/articles/2026/03/americas-unstoppable-momentum-in-operation-epic-fury/",
+      "https://www.whitehouse.gov/briefings-statements/2026/03/america-250-presidential-message-on-the-anniversary-of-the-boston-massacre/"
+    ],
+    "updated_at": 1772813763
+  },
+  "91004": {
+    "report_path": "dummy_report.md",
+    "executive_summary": "Cloud summary smoke.",
+    "trends": [
+      "Trend A"
+    ],
+    "highlights": [
+      "Highlight A"
+    ],
+    "questions": [],
+    "links": [
+      "https://example.com"
+    ],
+    "updated_at": 1772811399
+  }
+}
