@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 
 from core.health import heartbeat_summary, record_error, record_poll_ok, record_voice
+from tools.tg_message import split_for_telegram
 
 
 class TelegramConflictError(RuntimeError):
@@ -45,16 +46,30 @@ def _telegram_api_call(token: str, method: str, data: dict | None = None, timeou
     return result
 
 
-def send_telegram_message(token: str, chat_id: int, text: str, timeout: int = 30) -> None:
-    _telegram_api_call(
-        token,
-        "sendMessage",
-        data={
-            "chat_id": str(chat_id),
-            "text": text,
-        },
-        timeout=timeout,
-    )
+def send_telegram_message(
+    token: str,
+    chat_id: int,
+    text: str,
+    timeout: int = 30,
+    max_chars: int | None = None,
+    logger=None,
+) -> None:
+    payload = str(text or "").strip()
+    if not payload:
+        return
+    parts = split_for_telegram(payload, max_chars=max_chars or 2800) if max_chars else [payload]
+    if logger is not None:
+        logger.info("TG send split parts=%d chars=%d", len(parts), len(payload))
+    for part in parts:
+        _telegram_api_call(
+            token,
+            "sendMessage",
+            data={
+                "chat_id": str(chat_id),
+                "text": part,
+            },
+            timeout=timeout,
+        )
 
 
 def _message_text(message: dict) -> str:
@@ -122,7 +137,7 @@ def _poll_once(token: str, message_handler, offset: int | None, logger=None, pol
 
         if isinstance(reply, str) and reply.strip():
             try:
-                send_telegram_message(token, chat_id, reply.strip())
+                send_telegram_message(token, chat_id, reply.strip(), logger=logger)
             except Exception:
                 if logger is not None:
                     logger.exception("Telegram sendMessage failed")
