@@ -32,6 +32,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 from config.config_loader import CONFIG_PATH as RUNTIME_CONFIG_PATH, ConfigError, load_config
 from config.secrets_loader import SecretConfigError, load_secrets
 from core.llm_controller import (
+    RUN_CONFIRM_EN,
     chat_with_context as controller_chat_with_context,
     decide_and_respond,
     summarize_report_text as controller_summarize_report_text,
