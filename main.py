@@ -1,6 +1,8 @@
 ﻿from core.env_bootstrap import refresh_windows_path_from_registry
 
 refresh_windows_path_from_registry()
+from tools.env_check import check_env
+check_env()
 from pathlib import Path
 import argparse
 import os
