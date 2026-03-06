@@ -82,6 +82,15 @@ def _llm_provider() -> str:
     return "ollama"
 
 
+def _controller_provider_name() -> str:
+    provider = _env_str("TREND_CONTROLLER_PROVIDER", "openai").lower()
+    if provider in {"openai", "chatgpt"}:
+        return "openai"
+    if provider in {"ollama", "local"}:
+        return "ollama"
+    return "openai"
+
+
 def _chat_provider_name() -> str:
     provider = _env_str("TREND_CHAT_PROVIDER", "openai").lower()
     if provider in {"openai", "chatgpt"}:
@@ -186,10 +195,10 @@ def _run_openai_chat(*, model: str, messages: list[dict[str, str]], timeout_s: i
 
 
 def _run_controller_llm(prompt: str, *, text: str, timeout_s: int) -> str:
-    provider = _llm_provider()
+    provider = _controller_provider_name()
     if provider == "openai":
         model = _pick_openai_model(text, kind="controller")
-        logger.info("TG controller provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+        logger.info("TG controller provider=%s model=%s timeout_s=%s", provider, model, timeout_s)
         return _run_openai_chat(
             model=model,
             messages=[
@@ -199,7 +208,7 @@ def _run_controller_llm(prompt: str, *, text: str, timeout_s: int) -> str:
             timeout_s=timeout_s,
         )
     model = _pick_chat_model(text)
-    logger.info("TG controller provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+    logger.info("TG controller provider=%s model=%s timeout_s=%s", provider, model, timeout_s)
     return get_provider("ollama", model).chat(prompt, timeout_s=timeout_s)
 
 

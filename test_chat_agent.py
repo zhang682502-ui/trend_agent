@@ -13,6 +13,9 @@ OPENAI_CALLS: list[tuple[str, str, int]] = []
 def fake_run_openai_chat(*, model: str, messages: list[dict[str, str]], timeout_s: int) -> str:
     system_text = messages[0]["content"]
     user_text = messages[-1]["content"]
+    if "telegram agent controller" in system_text.lower():
+        OPENAI_CALLS.append(("controller", model, timeout_s))
+        return '{"reply":"Hi there.","plan":{"intent":"CHAT","actions":[{"tool":"chat_with_context","args":{"mode":"followup"}}],"needs_confirmation":false,"confirmation_prompt":null,"store_context":false,"context_id":"90000"}}'
     if "summarize report content" in system_text.lower():
         OPENAI_CALLS.append(("summary", model, timeout_s))
         return '{"executive_summary":"Cloud summary smoke.","trends":["Trend A"],"highlights":["Highlight A"],"questions":[]}'
@@ -25,6 +28,7 @@ def fake_run_openai_chat(*, model: str, messages: list[dict[str, str]], timeout_
 
 
 def main_smoke() -> None:
+    os.environ["TREND_CONTROLLER_PROVIDER"] = "openai"
     os.environ["TREND_CHAT_PROVIDER"] = "openai"
     os.environ["TREND_SUMMARY_PROVIDER"] = "openai"
     controller._run_openai_chat = fake_run_openai_chat  # type: ignore[assignment]
@@ -39,6 +43,7 @@ def main_smoke() -> None:
     news_reply = main._handle_telegram_text(91004, "today's news", source="text")
     status_reply = main._handle_telegram_text(91005, "/status", source="text")
     report_reply = main._handle_telegram_text(91006, "/report", source="text")
+    controller_reply, controller_plan = controller.decide_and_respond("hi", chat_id=90000, meta={"source": "text"})
 
     sys.stdout.buffer.write(f"ZH: {zh_reply}\n".encode("utf-8", errors="replace"))
     sys.stdout.buffer.write(f"EN: {en_reply}\n".encode("utf-8", errors="replace"))
@@ -46,13 +51,17 @@ def main_smoke() -> None:
     sys.stdout.buffer.write(f"NEWS: {news_reply}\n".encode("utf-8", errors="replace"))
     sys.stdout.buffer.write(f"STATUS: {status_reply}\n".encode("utf-8", errors="replace"))
     sys.stdout.buffer.write(f"REPORT: {report_reply}\n".encode("utf-8", errors="replace"))
+    sys.stdout.buffer.write(f"CONTROLLER: {controller_reply} / {controller_plan.get('intent')}\n".encode("utf-8", errors="replace"))
 
     chat_calls = [call for call in OPENAI_CALLS if call[0] == "chat"]
     summary_calls = [call for call in OPENAI_CALLS if call[0] == "summary"]
+    controller_calls = [call for call in OPENAI_CALLS if call[0] == "controller"]
+    assert controller_calls, f"controller path did not use cloud provider: {OPENAI_CALLS}"
     assert len(chat_calls) >= 3, f"expected chat cloud calls, got {OPENAI_CALLS}"
     assert summary_calls, f"summary path did not use cloud provider: {OPENAI_CALLS}"
     assert status_reply == "TrendAgent alive ?"
     assert report_reply == "OK, running report."
+    assert str(controller_plan.get("intent")) == "CHAT"
 
     banned = (
         "I will continue with the current context.",
