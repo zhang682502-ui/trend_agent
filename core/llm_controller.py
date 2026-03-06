@@ -98,6 +98,15 @@ def _local_provider_name() -> str:
     return "ollama"
 
 
+def _summary_provider_name() -> str:
+    provider = _env_str("TREND_SUMMARY_PROVIDER", _chat_provider_name()).lower()
+    if provider in {"openai", "chatgpt"}:
+        return "openai"
+    if provider in {"ollama", "local"}:
+        return "ollama"
+    return _chat_provider_name()
+
+
 def _pick_chat_model(text: str) -> str:
     if _chat_language(text) == "zh":
         return str(os.getenv("TREND_LLM_ZH_MODEL", "qwen2") or "qwen2").strip() or "qwen2"
@@ -213,9 +222,20 @@ def _run_context_chat_llm(prompt: str, *, text: str, timeout_s: int) -> str:
 
 
 def _run_summary_llm(prompt: str, *, text: str, timeout_s: int) -> str:
-    provider = _local_provider_name()
+    provider = _summary_provider_name()
+    if provider == "openai":
+        model = _pick_openai_model(text, kind="summary")
+        logger.info("TG summary provider=%s model=%s timeout_s=%s", provider, model, timeout_s)
+        return _run_openai_chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You summarize report content. Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            timeout_s=timeout_s,
+        )
     model = _pick_chat_model(text)
-    logger.info("TG summary provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+    logger.info("TG summary provider=%s model=%s timeout_s=%s", provider, model, timeout_s)
     return get_provider(provider, model).summarize(prompt, timeout_s=timeout_s)
 
 

@@ -3,35 +3,32 @@ from __future__ import annotations
 import core.llm_controller as controller
 import main
 import sys
+import os
 from pathlib import Path
 
 
-CHAT_CALLS: list[tuple[str, int]] = []
-SUMMARY_CALLS: list[str] = []
+OPENAI_CALLS: list[tuple[str, str, int]] = []
 
 
-def fake_run_context_chat_llm(prompt: str, *, text: str, timeout_s: int) -> str:
-    CHAT_CALLS.append((text, timeout_s))
-    if controller.CJK_RE.search(text):
+def fake_run_openai_chat(*, model: str, messages: list[dict[str, str]], timeout_s: int) -> str:
+    system_text = messages[0]["content"]
+    user_text = messages[-1]["content"]
+    if "summarize report content" in system_text.lower():
+        OPENAI_CALLS.append(("summary", model, timeout_s))
+        return '{"executive_summary":"Cloud summary smoke.","trends":["Trend A"],"highlights":["Highlight A"],"questions":[]}'
+    OPENAI_CALLS.append(("chat", model, timeout_s))
+    if controller.CJK_RE.search(user_text):
         return "你好，当然可以。我们现在就随便聊聊。"
-    if "thanks" in text.lower():
+    if "thanks" in user_text.lower():
         return "You're welcome. We can chat."
     return "Hi, of course. We can chat for a bit."
 
 
-def fake_summarize_report_text(report_text: str, *, topic_hint: str | None = None) -> dict[str, object]:
-    SUMMARY_CALLS.append(report_text)
-    return {
-        "executive_summary": "Local summary smoke.",
-        "trends": ["Trend A"],
-        "highlights": ["Highlight A"],
-        "questions": [],
-    }
-
-
 def main_smoke() -> None:
-    controller._run_context_chat_llm = fake_run_context_chat_llm  # type: ignore[assignment]
-    main.controller_summarize_report_text = fake_summarize_report_text  # type: ignore[assignment]
+    os.environ["TREND_CHAT_PROVIDER"] = "openai"
+    os.environ["TREND_SUMMARY_PROVIDER"] = "openai"
+    controller._run_openai_chat = fake_run_openai_chat  # type: ignore[assignment]
+    main.controller_summarize_report_text = controller.summarize_report_text  # type: ignore[assignment]
     main.find_latest_report = lambda: Path("dummy_report.md")  # type: ignore[assignment]
     main.load_report_text = lambda _path: "Title: A\nSource: Test\nLink: https://example.com\nContent: Example."  # type: ignore[assignment]
     main._start_telegram_report_thread = lambda _chat_id: True  # type: ignore[assignment]
@@ -50,11 +47,10 @@ def main_smoke() -> None:
     sys.stdout.buffer.write(f"STATUS: {status_reply}\n".encode("utf-8", errors="replace"))
     sys.stdout.buffer.write(f"REPORT: {report_reply}\n".encode("utf-8", errors="replace"))
 
-    assert len(CHAT_CALLS) >= 3, f"expected chat calls, got {CHAT_CALLS}"
-    assert CHAT_CALLS[0][0] == "你好，我们聊聊吧"
-    assert CHAT_CALLS[1][0] == "Hi, can we chat a bit?"
-    assert CHAT_CALLS[2][0] == "thanks"
-    assert SUMMARY_CALLS, "summary path did not run"
+    chat_calls = [call for call in OPENAI_CALLS if call[0] == "chat"]
+    summary_calls = [call for call in OPENAI_CALLS if call[0] == "summary"]
+    assert len(chat_calls) >= 3, f"expected chat cloud calls, got {OPENAI_CALLS}"
+    assert summary_calls, f"summary path did not use cloud provider: {OPENAI_CALLS}"
     assert status_reply == "TrendAgent alive ?"
     assert report_reply == "OK, running report."
 
