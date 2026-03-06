@@ -60,6 +60,7 @@ from tools.local_llm import (
 from tools.local_llm_cache import load_cache as load_llm_summary_cache, save_cache as save_llm_summary_cache
 from tools.pipeline_runner import run_pipeline_once
 from tools.report_reader import find_latest_report, load_report_text
+from tools.log_cleanup import cleanup_logs
 from tools.tg_message import strip_redundant_closings
 
 
@@ -193,6 +194,14 @@ def setup_logger() -> logging.Logger:
 
 
 logger = setup_logger()
+
+
+def _startup_log_maintenance() -> None:
+    try:
+        removed = cleanup_logs(LOG_DIR, older_than_days=7)
+        logger.info("Log cleanup completed removed=%s dir=%s", removed, LOG_DIR)
+    except Exception:
+        logger.exception("Log cleanup failed")
 RUN_TRIGGER_LOCK = threading.Lock()
 TELEGRAM_THREAD = None
 TG_AGENT_REQUEST_LOCK = threading.Lock()
@@ -2924,6 +2933,7 @@ def md_to_simple_html(
 
 
 def main(start_telegram: bool = False, dev_mode: bool = False) -> int:
+    _startup_log_maintenance()
     if not RUN_TRIGGER_LOCK.acquire(blocking=False):
         logger.warning("Run requested while another run is active")
         return 2
@@ -3690,6 +3700,7 @@ def append_history(status: dict, keep_last: int = 200):
     # return 1
 
 def run_telegram_mode() -> int:
+    _startup_log_maintenance()
     runtime_secrets = _load_runtime_secrets()
     if runtime_secrets is None:
         return 1
