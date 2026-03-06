@@ -18,6 +18,14 @@ All non-secret behavior lives in `config/config.json`.
 - Set `discord.single_message` to `true` to keep one webhook message per channel and edit that same message on each run.
 - Single-message state is stored per webhook in `Json/discord_single_message_<sha256(webhook_url)[:12]>.json`.
 
+## Startup Scripts
+
+- `start_agent.ps1` -> run Telegram agent
+- `start_dev.ps1` -> development mode
+- `start_pipeline.ps1` -> run pipeline only
+
+Create a local `.env` file from `.env.example` before using the scripts if you want API keys and runtime flags loaded automatically.
+
 
 
 \## 1. Vision
