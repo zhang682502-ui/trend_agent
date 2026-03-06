@@ -4,15 +4,32 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
-from tools.ollama_cli import run_ollama
+import requests
+
+from providers.provider_factory import get_provider
 
 
 logger = logging.getLogger("trend_agent")
 CJK_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 ALLOWED_INTENTS = {"CHAT", "FULL_REPORT_SUMMARY", "RUN_PIPELINE", "CLARIFY"}
 ALLOWED_TOOLS = {"get_latest_report", "summarize_report_full", "run_pipeline", "chat_with_context"}
+INTENT_ALIASES = {
+    "GET_LATEST_REPORT": "FULL_REPORT_SUMMARY",
+    "SUMMARIZE_REPORT": "FULL_REPORT_SUMMARY",
+    "SUMMARIZE_LATEST_REPORT": "FULL_REPORT_SUMMARY",
+    "PIPELINE": "RUN_PIPELINE",
+}
+TOOL_ALIASES = {
+    "GET_LATEST_REPORT": "get_latest_report",
+    "SUMMARIZE_REPORT": "summarize_report_full",
+    "SUMMARIZE_REPORT_FULL": "summarize_report_full",
+    "RUN_PIPELINE": "run_pipeline",
+    "CHAT": "chat_with_context",
+}
+OPENAI_COOLDOWN_UNTIL = 0.0
 
 RUN_CONFIRM_ZH = (
     "我可以现在把完整流程跑一遍：抓 RSS、生成报告，并按你现在的设置发邮件/更新 HTML。要我现在开始吗？"
@@ -37,15 +54,157 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
         return max(minimum, int(default))
 
 
+def _env_str(name: str, default: str = "") -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip()
+
+
 def detect_language(text: str) -> str:
     cjk_count = len(CJK_RE.findall(text or ""))
     return "zh" if cjk_count >= 20 else "en"
+
+
+def _llm_provider() -> str:
+    provider = _env_str("TREND_LLM_PROVIDER", "ollama").lower()
+    if provider in {"openai", "chatgpt"}:
+        return "openai"
+    if provider in {"local", "ollama"}:
+        return "ollama"
+    return "ollama"
 
 
 def _pick_chat_model(text: str) -> str:
     if detect_language(text) == "zh":
         return str(os.getenv("TREND_LLM_ZH_MODEL", "qwen2") or "qwen2").strip() or "qwen2"
     return str(os.getenv("TREND_LLM_EN_MODEL", "llama3") or "llama3").strip() or "llama3"
+
+
+def _pick_openai_model(text: str, *, kind: str) -> str:
+    lang = detect_language(text)
+    base = _env_str("TREND_OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
+    if kind == "controller":
+        specific = _env_str("TREND_OPENAI_CONTROLLER_MODEL")
+    elif kind == "summary":
+        specific = _env_str("TREND_OPENAI_SUMMARY_MODEL")
+    else:
+        specific = _env_str("TREND_OPENAI_CHAT_MODEL")
+    zh_specific = _env_str("TREND_OPENAI_ZH_MODEL")
+    if lang == "zh" and zh_specific:
+        return zh_specific
+    return specific or base
+
+
+def _extract_openai_text(payload: dict[str, Any]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _run_openai_chat(*, model: str, messages: list[dict[str, str]], timeout_s: int) -> str:
+    global OPENAI_COOLDOWN_UNTIL
+    api_key = _env_str("TREND_OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("TREND_OPENAI_API_KEY is not set")
+    base_url = _env_str("TREND_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    now = time.time()
+    if OPENAI_COOLDOWN_UNTIL > now:
+        retry_in = max(1, int(OPENAI_COOLDOWN_UNTIL - now))
+        raise RuntimeError(f"OpenAI temporarily rate limited; retry in {retry_in}s")
+    response = requests.post(
+        f"{base_url}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": messages,
+            "temperature": 0.1,
+        },
+        timeout=max(5, int(timeout_s) + 5),
+    )
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        if response.status_code == 429:
+            OPENAI_COOLDOWN_UNTIL = time.time() + _env_int("TREND_OPENAI_RATE_LIMIT_COOLDOWN_S", 45, minimum=5)
+        raise
+    payload = response.json()
+    text = _extract_openai_text(payload)
+    if text:
+        return text
+    raise RuntimeError("OpenAI response did not contain message content")
+
+
+def _run_controller_llm(prompt: str, *, text: str, timeout_s: int) -> str:
+    provider = _llm_provider()
+    if provider == "openai":
+        model = _pick_openai_model(text, kind="controller")
+        logger.info("TG controller provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+        return _run_openai_chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a Telegram agent controller. Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            timeout_s=timeout_s,
+        )
+    model = _pick_chat_model(text)
+    logger.info("TG controller provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+    return get_provider("ollama", model).chat(prompt, timeout_s=timeout_s)
+
+
+def _run_context_chat_llm(prompt: str, *, text: str, timeout_s: int) -> str:
+    provider = _llm_provider()
+    if provider == "openai":
+        model = _pick_openai_model(text, kind="chat")
+        logger.info("TG context provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+        return _run_openai_chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a concise assistant discussing a trend report context."},
+                {"role": "user", "content": prompt},
+            ],
+            timeout_s=timeout_s,
+        )
+    model = _pick_chat_model(text)
+    logger.info("TG context provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+    return get_provider("ollama", model).chat(prompt, timeout_s=timeout_s)
+
+
+def _run_summary_llm(prompt: str, *, text: str, timeout_s: int) -> str:
+    provider = _llm_provider()
+    if provider == "openai":
+        model = _pick_openai_model(text, kind="summary")
+        logger.info("TG summary provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+        return _run_openai_chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You summarize report content. Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            timeout_s=timeout_s,
+        )
+    model = _pick_chat_model(text)
+    logger.info("TG summary provider=%s timeout_s=%s model=%s", provider, timeout_s, model)
+    return get_provider("ollama", model).summarize(prompt, timeout_s=timeout_s)
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -92,6 +251,164 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _to_summary_list(value: Any, *, limit: int = 6) -> list[str]:
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+    elif isinstance(value, str):
+        items = [part.strip("-* \t") for part in value.splitlines() if part.strip()]
+    else:
+        items = []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _split_report_items(report_text: str) -> list[str]:
+    lines = (report_text or "").splitlines()
+    items: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        if line.startswith("Title:") and current:
+            items.append("\n".join(current).strip())
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        items.append("\n".join(current).strip())
+    items = [item for item in items if item]
+    if items:
+        return items
+    compact = (report_text or "").strip()
+    return [compact] if compact else []
+
+
+def _parse_report_item(item_text: str) -> dict[str, str]:
+    fields = {"title": "", "source": "", "link": "", "content": ""}
+    content_lines: list[str] = []
+    current_key = ""
+    for raw_line in (item_text or "").splitlines():
+        line = raw_line.strip()
+        if line.startswith("Title:"):
+            fields["title"] = line.split(":", 1)[1].strip()
+            current_key = "title"
+            continue
+        if line.startswith("Source:"):
+            fields["source"] = line.split(":", 1)[1].strip()
+            current_key = "source"
+            continue
+        if line.startswith("Link:"):
+            fields["link"] = line.split(":", 1)[1].strip()
+            current_key = "link"
+            continue
+        if line.startswith("Content:"):
+            body = line.split(":", 1)[1].strip()
+            if body:
+                content_lines.append(body)
+            current_key = "content"
+            continue
+        if current_key == "content" and line:
+            content_lines.append(line)
+    fields["content"] = " ".join(content_lines).strip()
+    return fields
+
+
+def _fallback_report_summary(report_text: str, *, topic_hint: str | None = None) -> dict[str, Any]:
+    items = [_parse_report_item(item) for item in _split_report_items(report_text)]
+    parsed_items = [item for item in items if any(item.values())]
+    titles = [item["title"] for item in parsed_items if item.get("title")]
+    lang = detect_language(report_text)
+    hint = str(topic_hint or "").strip()
+
+    highlights: list[str] = []
+    for item in parsed_items[:5]:
+        title = item.get("title", "").strip()
+        if not title:
+            continue
+        source = item.get("source", "").strip()
+        link = item.get("link", "").strip()
+        label = f"{source}: {title}" if source else title
+        if link:
+            label = f"{label} ({link})"
+        highlights.append(label)
+
+    if titles:
+        lead = "; ".join(titles[:4])
+        if lang == "zh":
+            executive = f"本次报告的重点包括：{lead}。"
+        else:
+            executive = f"Key items in this report: {lead}."
+    else:
+        compact = re.sub(r"\s+", " ", (report_text or "")).strip()
+        executive = compact[:400] or ("未找到可总结的报告内容。" if lang == "zh" else "No report content was available to summarize.")
+    if hint:
+        if lang == "zh":
+            executive = f"{executive} 关注点：{hint}。"
+        else:
+            executive = f"{executive} Focus: {hint}."
+
+    return {
+        "executive_summary": executive,
+        "trends": titles[:5],
+        "highlights": highlights[:5] or titles[:5],
+        "questions": [],
+    }
+
+
+def summarize_report_text(report_text: str, *, topic_hint: str | None = None) -> dict[str, Any]:
+    content = (report_text or "").strip()
+    if not content:
+        return {
+            "executive_summary": "No report content was found.",
+            "trends": [],
+            "highlights": [],
+            "questions": [],
+        }
+
+    lang = detect_language(content)
+    timeout_s = _env_int("TREND_LLM_SUMMARY_TIMEOUT_S", _env_int("TREND_LLM_CHAT_TIMEOUT_S", 120, minimum=3), minimum=10)
+    max_chars = _env_int("TREND_CLOUD_SUMMARY_MAX_CHARS", 18000, minimum=2000)
+    prompt = (
+        "Summarize the following report content.\n"
+        "Return ONLY valid JSON with this schema:\n"
+        '{"executive_summary":"...","trends":["..."],"highlights":["..."],"questions":["..."]}\n'
+        "Rules:\n"
+        "- Be factual and concise.\n"
+        "- executive_summary should be 3-6 sentences.\n"
+        "- trends/highlights/questions max 5 items each.\n"
+        "- Do not paste raw report blocks.\n"
+        "- Do not invent facts that are not in the report.\n"
+        "- If the report has multiple items, mention the main cross-cutting themes, not just the first link.\n"
+        f"- Reply in {'Chinese' if lang == 'zh' else 'English'}.\n"
+        f"Topic hint: {str(topic_hint or 'none').strip()}\n\n"
+        f"Report content:\n{content[:max_chars]}"
+    )
+    fallback = _fallback_report_summary(content, topic_hint=topic_hint)
+    try:
+        raw = _run_summary_llm(prompt, text=content, timeout_s=timeout_s)
+        payload = _extract_json_object(raw) or {}
+        executive = str(payload.get("executive_summary") or "").strip()
+        summary = {
+            "executive_summary": executive or fallback["executive_summary"],
+            "trends": _to_summary_list(payload.get("trends"), limit=5) or fallback["trends"],
+            "highlights": _to_summary_list(payload.get("highlights"), limit=5) or fallback["highlights"],
+            "questions": _to_summary_list(payload.get("questions"), limit=5),
+        }
+        if not summary["questions"]:
+            summary["questions"] = fallback["questions"]
+        return summary
+    except Exception as exc:
+        logger.warning("TG summary fallback error=%s", exc)
+        return fallback
+
+
 def _normalize_plan(plan: dict[str, Any] | None, *, chat_id: int, default_lang: str) -> dict[str, Any]:
     base = {
         "intent": "CHAT",
@@ -106,6 +423,7 @@ def _normalize_plan(plan: dict[str, Any] | None, *, chat_id: int, default_lang: 
 
     normalized = dict(base)
     intent = str(plan.get("intent") or "").strip().upper()
+    intent = INTENT_ALIASES.get(intent, intent)
     if intent in ALLOWED_INTENTS:
         normalized["intent"] = intent
 
@@ -116,6 +434,7 @@ def _normalize_plan(plan: dict[str, Any] | None, *, chat_id: int, default_lang: 
             if not isinstance(item, dict):
                 continue
             tool = str(item.get("tool") or "").strip()
+            tool = TOOL_ALIASES.get(tool.upper(), tool)
             if tool not in ALLOWED_TOOLS:
                 continue
             args = item.get("args")
@@ -152,15 +471,105 @@ def _normalize_plan(plan: dict[str, Any] | None, *, chat_id: int, default_lang: 
     return normalized
 
 
-def _fallback_controller(text: str, *, chat_id: int, meta: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
+def _request_hints(text: str) -> dict[str, bool]:
     lowered = (text or "").strip().lower()
+    return {
+        "run": any(
+            token in lowered
+            for token in ("run", "send report", "send the report", "pipeline", "generate", "refresh rss", "to my email", "email me")
+        ),
+        "summary": any(
+            token in lowered
+            for token in ("summary", "summarize", "summarise", "overview", "read the latest report", "key points", "what does it say", "总结", "通读")
+        ),
+        "report": any(token in lowered for token in ("report", "latest news", "latest report", "报告")),
+        "status_like": lowered in {"status", "health", "alive"} or any(token in lowered for token in ("system status", "bot status")),
+        "help_like": lowered in {"help", "commands"} or any(token in lowered for token in ("what can you do", "how do i use this", "how to use this")),
+    }
+
+
+def _coerce_plan_from_text(text: str, plan: dict[str, Any], *, chat_id: int, default_lang: str, has_context: bool) -> dict[str, Any]:
+    normalized = dict(plan)
+    hints = _request_hints(text)
+    intent = str(normalized.get("intent") or "CHAT").strip().upper()
+
+    if (hints["status_like"] or hints["help_like"]) and not hints["run"] and not hints["summary"] and not hints["report"]:
+        normalized.update(
+            {
+                "intent": "CHAT",
+                "actions": [{"tool": "chat_with_context", "args": {"mode": "followup"}}],
+                "needs_confirmation": False,
+                "confirmation_prompt": None,
+                "store_context": has_context,
+                "context_id": str(chat_id),
+            }
+        )
+        return normalized
+
+    if hints["run"] and not hints["summary"]:
+        normalized.update(
+            {
+                "intent": "RUN_PIPELINE",
+                "actions": [{"tool": "run_pipeline", "args": {}}],
+                "needs_confirmation": True,
+                "confirmation_prompt": RUN_CONFIRM_ZH if default_lang == "zh" else RUN_CONFIRM_EN,
+                "store_context": False,
+                "context_id": str(chat_id),
+            }
+        )
+        return normalized
+
+    if hints["summary"] or (hints["report"] and intent != "RUN_PIPELINE" and not hints["run"]):
+        normalized.update(
+            {
+                "intent": "FULL_REPORT_SUMMARY",
+                "actions": [
+                    {"tool": "get_latest_report", "args": {}},
+                    {"tool": "summarize_report_full", "args": {"topic_hint": None}},
+                ],
+                "needs_confirmation": False,
+                "confirmation_prompt": None,
+                "store_context": True,
+                "context_id": str(chat_id),
+            }
+        )
+        return normalized
+
+    if intent == "CHAT":
+        normalized["actions"] = [{"tool": "chat_with_context", "args": {"mode": "followup"}}]
+        normalized["store_context"] = has_context
+    return normalized
+
+
+def _informational_chat_reply(text: str, *, lang: str) -> str | None:
+    hints = _request_hints(text)
+    if hints["status_like"]:
+        if lang == "zh":
+            return "我在线。精确本地状态请用 /status。你也可以让我总结最新报告或发起新的报告流程。"
+        return "I am available. Use /status for the exact local status. You can also ask me to summarize the latest report or start a new report run."
+    if hints["help_like"]:
+        if lang == "zh":
+            return "我可以读取并总结最新报告、解释要点、或发起新的报告流程。精确本地命令有 /status、/help、/report。"
+        return "I can summarize the latest report, explain key points, or start a new report run. Exact local commands are /status, /help, and /report."
+    return None
+
+
+def _reply_from_plan(plan: dict[str, Any], *, lang: str) -> str:
+    intent = str(plan.get("intent") or "CHAT").strip().upper()
+    if intent == "RUN_PIPELINE":
+        return str(plan.get("confirmation_prompt") or (RUN_CONFIRM_ZH if lang == "zh" else RUN_CONFIRM_EN)).strip()
+    if intent == "FULL_REPORT_SUMMARY":
+        return "我会读取最新报告并给你完整总结。" if lang == "zh" else "I will read the latest report and send a full summary."
+    if intent == "CLARIFY":
+        return str(plan.get("confirmation_prompt") or (AMBIGUOUS_CONFIRM_ZH if lang == "zh" else AMBIGUOUS_CONFIRM_EN)).strip()
+    return "我会继续结合当前上下文处理。" if lang == "zh" else "I will continue with the current context."
+
+
+def _fallback_controller(text: str, *, chat_id: int, meta: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
     lang = detect_language(text)
     has_context = bool((meta or {}).get("context"))
-    run_hit = any(token in lowered for token in ("run", "report", "rss", "refresh", "pipeline", "生成", "重跑", "跑一下", "跑一遍"))
-    summary_hit = any(token in lowered for token in ("summary", "summarize", "overview", "通读", "总结", "概览"))
-    report_hit = any(token in lowered for token in ("report", "报告"))
-
-    if run_hit and summary_hit:
+    hints = _request_hints(text)
+    if hints["run"] and hints["summary"]:
         plan = {
             "intent": "CLARIFY",
             "actions": [],
@@ -169,47 +578,25 @@ def _fallback_controller(text: str, *, chat_id: int, meta: dict[str, Any] | None
             "store_context": False,
             "context_id": str(chat_id),
         }
-        reply = plan["confirmation_prompt"]
-        return reply, plan
+        return str(plan["confirmation_prompt"]), plan
 
-    if run_hit:
-        plan = {
-            "intent": "RUN_PIPELINE",
-            "actions": [{"tool": "run_pipeline", "args": {}}],
-            "needs_confirmation": True,
-            "confirmation_prompt": RUN_CONFIRM_ZH if lang == "zh" else RUN_CONFIRM_EN,
-            "store_context": False,
-            "context_id": str(chat_id),
-        }
-        reply = plan["confirmation_prompt"]
-        return reply, plan
-
-    if summary_hit or report_hit:
-        plan = {
-            "intent": "FULL_REPORT_SUMMARY",
-            "actions": [
-                {"tool": "get_latest_report", "args": {}},
-                {"tool": "summarize_report_full", "args": {"topic_hint": None}},
-            ],
+    base_plan = _normalize_plan(
+        {
+            "intent": "CHAT",
+            "actions": [{"tool": "chat_with_context", "args": {"mode": "followup"}}],
             "needs_confirmation": False,
             "confirmation_prompt": None,
-            "store_context": True,
+            "store_context": has_context,
             "context_id": str(chat_id),
-        }
-        reply = "我先读最新报告，然后给你一段完整总结。" if lang == "zh" else "I will read the latest report and produce a full summary."
-        return reply, plan
-
-    plan = {
-        "intent": "CHAT",
-        "actions": [{"tool": "chat_with_context", "args": {"mode": "followup"}}],
-        "needs_confirmation": False,
-        "confirmation_prompt": None,
-        "store_context": has_context,
-        "context_id": str(chat_id),
-    }
-    reply = "好的，我结合当前上下文和你继续聊。" if lang == "zh" else "Sure, I will continue with your context."
-    return reply, plan
-
+        },
+        chat_id=chat_id,
+        default_lang=lang,
+    )
+    plan = _coerce_plan_from_text(text, base_plan, chat_id=chat_id, default_lang=lang, has_context=has_context)
+    info_reply = _informational_chat_reply(text, lang=lang)
+    if plan["intent"] == "CHAT" and info_reply:
+        return info_reply, plan
+    return _reply_from_plan(plan, lang=lang), plan
 
 def decide_and_respond(user_text: str, chat_id: int, meta: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
     text = (user_text or "").strip()
@@ -218,19 +605,21 @@ def decide_and_respond(user_text: str, chat_id: int, meta: dict[str, Any] | None
 
     meta = meta or {}
     lang = detect_language(text)
-    model = _pick_chat_model(text)
     timeout_s = _env_int("TREND_LLM_CHAT_TIMEOUT_S", 120, minimum=3)
 
     context = meta.get("context") if isinstance(meta.get("context"), dict) else {}
     context_digest = json.dumps(context, ensure_ascii=False)[:1200] if context else "{}"
+    pending_plan = meta.get("pending_plan") if isinstance(meta.get("pending_plan"), dict) else {}
+    pending_digest = json.dumps(pending_plan, ensure_ascii=False)[:600] if pending_plan else "{}"
     prompt = (
         "You are a Telegram agent controller.\n"
-        "Return ONLY valid JSON. No markdown.\n"
+        "Return ONLY valid JSON. No markdown. No prose outside JSON.\n"
+        "You are selecting an executable control plan, not chatting casually.\n"
         "JSON schema:\n"
         "{"
-        '"reply":"<natural response>",'
+        '"reply":"<short operational response>",'
         '"plan":{'
-        '"intent":"CHAT|FULL_REPORT_SUMMARY|RUN_PIPELINE|CLARIFY",'
+        '"intent":"CHAT|FULL_REPORT_SUMMARY|RUN_PIPELINE|CLARIFY|GET_LATEST_REPORT|SUMMARIZE_REPORT",'
         '"actions":[{"tool":"get_latest_report|summarize_report_full|run_pipeline|chat_with_context","args":{}}],'
         '"needs_confirmation":true|false,'
         '"confirmation_prompt":"<string or null>",'
@@ -239,41 +628,60 @@ def decide_and_respond(user_text: str, chat_id: int, meta: dict[str, Any] | None
         "}"
         "}\n"
         "Rules:\n"
-        "- If user requests running a new report/pipeline, use intent RUN_PIPELINE with needs_confirmation=true.\n"
-        "- If user asks to summarize latest report, use FULL_REPORT_SUMMARY.\n"
-        "- For follow-up discussion with context, use CHAT + chat_with_context.\n"
+        "- If user requests sending, generating, rerunning, refreshing, or emailing a report, use RUN_PIPELINE with needs_confirmation=true.\n"
+        "- If user asks to read, summarize, explain, or give key points from the latest report/news, use FULL_REPORT_SUMMARY.\n"
+        "- For follow-up discussion with existing context, use CHAT plus chat_with_context.\n"
+        "- If user asks for status/help/capabilities without requesting an action, use CHAT.\n"
         "- If ambiguous between summarize-latest and regenerate, use CLARIFY.\n"
-        "- Keep reply short and natural in user's language.\n\n"
+        "- reply must match the plan and stay operational, not chatty.\n"
+        "- Do not say you already completed work unless the plan would execute it now.\n"
+        "- Prefer concrete action intents over generic CHAT when the user asks for a report or pipeline action.\n"
+        "Examples:\n"
+        '- User: "please send the report" -> intent RUN_PIPELINE, needs_confirmation true.\n'
+        '- User: "summarize the latest report" -> intent FULL_REPORT_SUMMARY.\n'
+        '- User: "what can you do" -> intent CHAT.\n\n'
+        '- User: "status" -> intent CHAT.\n'
+        '- User: "what can you do" -> intent CHAT.\n'
+        '- If a pending RUN_PIPELINE exists and the user asks an informational question, keep the turn as CHAT rather than cancelling the pending action.\n\n'
         f"User text:\n{text}\n\n"
+        f"Pending plan:\n{pending_digest}\n\n"
         f"Existing context:\n{context_digest}\n"
     )
 
     try:
-        logger.info("TG LLM chat timeout_s=%s model=%s", timeout_s, model)
-        raw = run_ollama(model=model, prompt=prompt, timeout_s=timeout_s)
+        raw = _run_controller_llm(prompt, text=text, timeout_s=timeout_s)
         payload = _extract_json_object(raw)
         if not isinstance(payload, dict):
             raise RuntimeError("controller output was not valid JSON")
+        plan = _normalize_plan(
+            payload.get("plan") if isinstance(payload.get("plan"), dict) else None,
+            chat_id=chat_id,
+            default_lang=lang,
+        )
+        plan = _coerce_plan_from_text(text, plan, chat_id=chat_id, default_lang=lang, has_context=bool(context))
         reply = str(payload.get("reply") or "").strip()
-        plan = _normalize_plan(payload.get("plan") if isinstance(payload.get("plan"), dict) else None, chat_id=chat_id, default_lang=lang)
         if plan["intent"] == "RUN_PIPELINE" and lang == "zh":
             plan["confirmation_prompt"] = RUN_CONFIRM_ZH
         if plan["intent"] == "CLARIFY" and lang == "zh":
             plan["confirmation_prompt"] = AMBIGUOUS_CONFIRM_ZH
-        if not reply:
-            reply = plan.get("confirmation_prompt") or ("我来处理。" if lang == "zh" else "I will handle that.")
+        structured_reply = _reply_from_plan(plan, lang=lang)
+        if plan["intent"] != "CHAT":
+            reply = structured_reply
+        elif not reply:
+            reply = structured_reply
+        info_reply = _informational_chat_reply(text, lang=lang)
+        if plan["intent"] == "CHAT" and info_reply:
+            reply = info_reply
         return reply, plan
     except Exception as exc:
         logger.warning("TG controller fallback chat_id=%s error=%s", chat_id, exc)
         return _fallback_controller(text, chat_id=chat_id, meta=meta)
-
 
 def chat_with_context(user_text: str, context: dict[str, Any] | None = None, meta: dict[str, Any] | None = None) -> str:
     text = (user_text or "").strip()
     if not text:
         return "Please send a message."
     lang = detect_language(text)
-    model = _pick_chat_model(text)
     timeout_s = _env_int("TREND_LLM_CHAT_TIMEOUT_S", 120, minimum=3)
     context = context if isinstance(context, dict) else {}
     context_snippet = json.dumps(context, ensure_ascii=False)[:1600] if context else "{}"
@@ -285,12 +693,40 @@ def chat_with_context(user_text: str, context: dict[str, Any] | None = None, met
         f"User:\n{text}\n"
     )
     try:
-        logger.info("TG LLM chat timeout_s=%s model=%s", timeout_s, model)
-        reply = run_ollama(model=model, prompt=prompt, timeout_s=timeout_s).strip()
+        reply = _run_context_chat_llm(prompt, text=text, timeout_s=timeout_s).strip()
         if reply:
             return reply
     except Exception as exc:
         logger.warning("TG context chat fallback error=%s", exc)
+
+    executive_summary = str(context.get("executive_summary") or "").strip()
+    point_items: list[str] = []
+    for key in ("trends", "highlights", "questions"):
+        value = context.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            text_item = str(item).strip()
+            if text_item:
+                point_items.append(text_item)
+            if len(point_items) >= 3:
+                break
+        if len(point_items) >= 3:
+            break
+    if executive_summary or point_items:
+        lines: list[str] = []
+        if executive_summary:
+            lines.append(executive_summary)
+        if point_items:
+            if lines:
+                lines.append("")
+            lines.append("Top points:")
+            for idx, item in enumerate(point_items[:3], start=1):
+                lines.append(f"{idx}. {item}")
+        payload = "\n".join(lines).strip()
+        if payload:
+            return payload
+
     if lang == "zh":
         return "我先按通用理解回答。如果你希望更准确，我可以先读取并总结最新报告。"
     return "I can answer generally, or I can first read and summarize the latest report for a more accurate discussion."

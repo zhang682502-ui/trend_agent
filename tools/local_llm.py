@@ -4,7 +4,7 @@ import logging
 import os
 import re
 
-from tools.ollama_cli import run_ollama
+from providers.provider_factory import get_provider
 
 CJK_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 logger = logging.getLogger("trend_agent")
@@ -169,5 +169,6 @@ def summarize_article(
         )
     logger.info("LLM route: lang=%s diff=%s -> %s", lang, difficulty, model)
     prompt = _build_prompt(title=title or "(no title)", content=trimmed_content, max_bullets=max_bullets)
-    raw_text = run_ollama(model=model, prompt=prompt, timeout_s=timeout_s)
+    provider = get_provider("ollama", model)
+    raw_text = provider.chat(prompt, timeout_s=timeout_s)
     return _normalize_bullets(raw_text, max_bullets=max_bullets)
